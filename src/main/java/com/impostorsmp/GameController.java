@@ -19,7 +19,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
@@ -173,7 +172,7 @@ public final class GameController {
 	// ------------------------------------------------------------------ deaths and winning
 
 	void onDeath(LivingEntity entity, DamageSource source) {
-		if (entity.getType() == EntityType.ENDER_DRAGON) {
+		if (entity.getClass().getSimpleName().equals("EnderDragon")) {
 			if (state.phase() == Phase.RUNNING && rules.bool("dragon_wins")) {
 				finish(Outcome.INNOCENTS, "The Ender Dragon has been slain!");
 			}
