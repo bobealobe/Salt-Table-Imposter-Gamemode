@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"id": "impostorsmp",
+	"version": "${version}",
+	"name": "Impostor SMP",
+	"description": "Hardcore survival with two secret impostors. Roles, countdown, win titles, no chat, no F5, no locator bar, no totems.",
+	"license": "CC0-1.0",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.impostorsmp.ImpostorMod"
+		],
+		"client": [
+			"com.impostorsmp.client.ImpostorClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
