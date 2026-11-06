@@ -139,7 +139,7 @@ public final class GameController {
 			if (player == null) {
 				continue;
 			}
-			String target = player.getStringUUID();
+			String target = player.getGameProfile().name();
 			boolean impostor = m.role() == Role.IMPOSTOR;
 			Fx.times(server, target, 5, 70, 20);
 			Fx.subtitle(server, target, Fx.text(
@@ -208,7 +208,7 @@ public final class GameController {
 	private void punishInnocentKill(ServerPlayer killer) {
 		int seconds = rules.integer("anti_rdm_seconds");
 		int level = rules.integer("anti_rdm_level");
-		Fx.run(server, "effect give " + killer.getStringUUID() + " minecraft:slowness " + seconds + " " + (level - 1) + " true");
+		Fx.run(server, "effect give " + killer.getGameProfile().name() + " minecraft:slowness " + seconds + " " + (level - 1) + " true");
 		killer.sendSystemMessage(Component.literal("You killed another innocent. You are slowed for " + seconds + " seconds.")
 			.withStyle(ChatFormatting.RED));
 	}
@@ -263,7 +263,7 @@ public final class GameController {
 		if (!mustSpectate || player.isSpectator()) {
 			return;
 		}
-		Fx.run(server, "gamemode spectator " + player.getStringUUID());
+		Fx.run(server, "gamemode spectator " + player.getGameProfile().name());
 		if (member.isEmpty()) {
 			player.sendSystemMessage(Component.literal("A game is in progress, so you are spectating.")
 				.withStyle(ChatFormatting.GRAY));
