@@ -1,11 +1,14 @@
 package com.impostorsmp;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 
 import com.impostorsmp.GameState.Member;
@@ -103,8 +106,7 @@ public final class GameController {
 
 		long delay = 0;
 		if (rules.bool("spread_on_start")) {
-			Fx.run(server, "spreadplayers 0 0 " + rules.integer("spread_min_distance") + " "
-				+ rules.integer("spread_radius") + " false @a[gamemode=!spectator]");
+			spreadPlayers(players);
 			delay = 60; // give the world a moment to load around everybody
 		}
 
@@ -116,6 +118,45 @@ public final class GameController {
 		scheduler.after(delay + 90, this::youAre);
 		scheduler.after(delay + 140, this::reveal);
 		scheduler.after(delay + 260, this::beginRunning);
+	}
+
+	/**
+	 * Spreads everybody out over the map. With spread_group_size above 1, players are put into temporary
+	 * teams first, because /spreadplayers drops the members of one team on the same spot. The teams are
+	 * deleted again straight away.
+	 */
+	private void spreadPlayers(Map<UUID, String> players) {
+		int groupSize = rules.integer("spread_group_size");
+		List<String> teams = new ArrayList<>();
+
+		if (groupSize > 1) {
+			Set<UUID> impostorIds = new HashSet<>();
+			for (Member m : state.withRole(Role.IMPOSTOR)) {
+				impostorIds.add(m.id());
+			}
+			List<List<UUID>> groups = Grouping.make(new ArrayList<>(players.keySet()), impostorIds, groupSize,
+				rules.bool("spread_split_impostors"), new Random());
+			for (int i = 0; i < groups.size(); i++) {
+				List<UUID> group = groups.get(i);
+				if (group.size() < 2) {
+					continue; // a player on their own is spread by themselves anyway
+				}
+				String team = "imp_group_" + i;
+				teams.add(team);
+				Fx.run(server, "team remove " + team); // clears a leftover from a crash; fails quietly if none
+				Fx.run(server, "team add " + team);
+				for (UUID id : group) {
+					Fx.run(server, "team join " + team + " " + players.get(id));
+				}
+			}
+		}
+
+		Fx.run(server, "spreadplayers 0 0 " + rules.integer("spread_min_distance") + " "
+			+ rules.integer("spread_radius") + " " + (teams.isEmpty() ? "false" : "true") + " @a[gamemode=!spectator]");
+
+		for (String team : teams) {
+			Fx.run(server, "team remove " + team);
+		}
 	}
 
 	private void countdownStep(String number, String color) {

@@ -56,12 +56,20 @@ final class ImpostorCommands {
 			for (Rules.Def def : Rules.DEFS) {
 				LiteralArgumentBuilder<CommandSourceStack> one = Commands.literal(def.name())
 					.executes(ctx -> showRule(ctx.getSource(), def));
+				// The extra "menu" ending is what the clickable buttons use: it changes the rule and then
+				// shows the section again. Typing /imp rule <name> <value> works exactly as before.
 				if (def.type() == Rules.Type.BOOL) {
-					one.then(Commands.argument("value", BoolArgumentType.bool()).executes(ctx ->
-						setRule(ctx.getSource(), def, Boolean.toString(BoolArgumentType.getBool(ctx, "value")))));
+					one.then(Commands.argument("value", BoolArgumentType.bool())
+						.executes(ctx -> setRule(ctx.getSource(), def,
+							Boolean.toString(BoolArgumentType.getBool(ctx, "value")), false))
+						.then(Commands.literal("menu").executes(ctx -> setRule(ctx.getSource(), def,
+							Boolean.toString(BoolArgumentType.getBool(ctx, "value")), true))));
 				} else {
-					one.then(Commands.argument("value", IntegerArgumentType.integer(def.min(), def.max())).executes(ctx ->
-						setRule(ctx.getSource(), def, Integer.toString(IntegerArgumentType.getInteger(ctx, "value")))));
+					one.then(Commands.argument("value", IntegerArgumentType.integer(def.min(), def.max()))
+						.executes(ctx -> setRule(ctx.getSource(), def,
+							Integer.toString(IntegerArgumentType.getInteger(ctx, "value")), false))
+						.then(Commands.literal("menu").executes(ctx -> setRule(ctx.getSource(), def,
+							Integer.toString(IntegerArgumentType.getInteger(ctx, "value")), true))));
 				}
 				rule.then(one);
 			}
@@ -196,9 +204,7 @@ final class ImpostorCommands {
 		if (game == null || !allowed(src, game)) {
 			return 0;
 		}
-		for (Rules.Def def : Rules.DEFS) {
-			say(src, def.name() + " = " + game.rules().valueText(def.name()) + "  -  " + def.description());
-		}
+		RulesMenu.sendAll(src, game.rules());
 		return 1;
 	}
 
@@ -207,11 +213,11 @@ final class ImpostorCommands {
 		if (game == null || !allowed(src, game)) {
 			return 0;
 		}
-		say(src, def.name() + " = " + game.rules().valueText(def.name()) + "  -  " + def.description());
+		RulesMenu.sendOne(src, game.rules(), def);
 		return 1;
 	}
 
-	private static int setRule(CommandSourceStack src, Rules.Def def, String value) {
+	private static int setRule(CommandSourceStack src, Rules.Def def, String value, boolean showMenu) {
 		GameController game = game(src);
 		if (game == null || !allowed(src, game)) {
 			return 0;
@@ -225,7 +231,11 @@ final class ImpostorCommands {
 		if (def.name().equals("apply_gamerules") && game.rules().bool("apply_gamerules")) {
 			game.applyGameRules();
 		}
-		say(src, def.name() + " is now " + game.rules().valueText(def.name()));
+		if (showMenu) {
+			RulesMenu.sendChanged(src, game.rules(), def);
+		} else {
+			say(src, def.name() + " is now " + game.rules().valueText(def.name()));
+		}
 		return 1;
 	}
 

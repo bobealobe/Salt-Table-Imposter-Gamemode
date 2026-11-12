@@ -41,7 +41,9 @@ public final class Rules {
 		bool("apply_gamerules", true, "At world start and /imp start: locator bar off, reduced F3, no death or advancement messages."),
 		bool("spread_on_start", false, "/imp start first spreads everybody out randomly with /spreadplayers."),
 		integer("spread_radius", 2500, 100, 29999999, "Spread area is a square this many blocks from 0,0 in every direction."),
-		integer("spread_min_distance", 500, 0, 100000, "Minimum distance between players after spreading.")
+		integer("spread_min_distance", 500, 0, 100000, "Minimum distance between players after spreading."),
+		integer("spread_group_size", 1, 1, 6, "Players spawn in groups of this size (1 = everybody alone, 2 = pairs). Teammates land on the same spot."),
+		bool("spread_split_impostors", true, "Never put two impostors in the same spawn group, so they don't find each other at the start.")
 	);
 
 	private static Def bool(String name, boolean def, String description) {
