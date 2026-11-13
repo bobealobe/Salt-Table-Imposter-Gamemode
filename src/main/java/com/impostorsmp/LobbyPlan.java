@@ -14,7 +14,7 @@ import java.util.Locale;
 final class LobbyPlan {
 	static final String TAG = "imp_lobby";
 	/** The area to keep loaded while the lobby exists: x1 z1 x2 z2 in blocks. */
-	static final String FORCELOAD_AREA = "-12 -12 12 80";
+	static final String FORCELOAD_AREA = "-36 -13 12 80";
 
 	private LobbyPlan() {
 	}
@@ -64,15 +64,38 @@ final class LobbyPlan {
 		return "fill " + x1 + " " + y1 + " " + z1 + " " + x2 + " " + y2 + " " + z2 + " " + block;
 	}
 
+	// ------------------------------------------------------------------ helpers for building
+
+	/** A one-block-thick rectangle outline lying flat. (The fill command's "outline" mode fills a flat area completely.) */
+	private static List<String> ring(int x1, int x2, int yy, int z1, int z2, String block) {
+		return List.of(
+			fill(x1, yy, z1, x2, yy, z1, block),
+			fill(x1, yy, z2, x2, yy, z2, block),
+			fill(x1, yy, z1, x1, yy, z2, block),
+			fill(x2, yy, z1, x2, yy, z2, block));
+	}
+
+	private static String set(int x, int y, int z, String block) {
+		return "setblock " + x + " " + y + " " + z + " " + block;
+	}
+
+	private static final String LIGHT = "minecraft:light[level=15]";
+
 	// ------------------------------------------------------------------ build / remove
 
-	/** Commands that remove the lobby built at height y. The caller also removes the forceload. */
+	/**
+	 * Commands that remove the lobby built at height y. The caller also removes the forceload.
+	 * Also clears the shapes older versions built, so a lobby from an old version goes away too.
+	 */
 	static List<String> remove(int y) {
 		List<String> c = new ArrayList<>();
 		c.add("kill @e[type=minecraft:text_display,tag=" + TAG + "]");
-		c.add(fill(-12, y - 1, -12, 12, y + 9, 12, "minecraft:air"));
-		c.add(fill(-8, y - 1, 12, 8, y + 7, 34, "minecraft:air"));
-		c.add(fill(-11, y - 1, 34, 11, y + 13, 72, "minecraft:air"));
+		c.add(fill(-12, y - 1, -12, 12, y + 9, 12, "minecraft:air")); // the room
+		c.add(fill(-11, y - 1, 12, 11, y + 13, 50, "minecraft:air")); // the obstacle course
+		c.add(fill(-34, y - 1, -3, -12, y + 4, 3, "minecraft:air")); // the rules corridor
+		c.add(set(0, y + 1, -13, "minecraft:air")); // the hidden command block behind the start button
+		c.add(fill(-8, y - 1, 12, 8, y + 7, 34, "minecraft:air")); // older version: hallway
+		c.add(fill(-11, y - 1, 34, 11, y + 13, 72, "minecraft:air")); // older version: obstacle course
 		return c;
 	}
 
@@ -81,37 +104,51 @@ final class LobbyPlan {
 		List<String> c = new ArrayList<>();
 		c.add("kill @e[type=minecraft:text_display,tag=" + TAG + "]");
 
-		// The room: a closed box so nobody can fall out (the world is hardcore).
+		// Shells. The room is closed so nobody can fall out (the world is hardcore).
 		c.add(fill(-12, y - 1, -12, 12, y + 9, 12, "minecraft:black_concrete hollow"));
 		c.add(fill(-11, y - 1, -11, 11, y - 1, 11, "minecraft:smooth_quartz"));
-		for (int x : new int[] {-8, 0, 8}) {
-			for (int z : new int[] {-8, 0, 8}) {
-				c.add("setblock " + x + " " + (y + 9) + " " + z + " minecraft:sea_lantern");
-			}
-		}
+		c.add(fill(-11, y - 1, 12, 11, y + 13, 50, "minecraft:black_concrete hollow"));
+		c.add(fill(-10, y - 1, 13, 10, y - 1, 49, "minecraft:light_blue_concrete"));
+		c.add(fill(-34, y - 1, -3, -12, y + 4, 3, "minecraft:black_concrete hollow"));
+		c.add(fill(-33, y - 1, -2, -13, y - 1, 2, "minecraft:smooth_quartz"));
+		// Doors: the obstacle course opens straight off the room, the rules corridor is a small side door.
+		c.add(fill(-2, y, 12, 2, y + 4, 12, "minecraft:air"));
+		c.add(fill(-12, y, -1, -12, y + 2, 1, "minecraft:air"));
 
-		// The hallway through the south wall.
-		c.add(fill(-8, y - 1, 12, 8, y + 7, 34, "minecraft:black_concrete hollow"));
-		c.add(fill(-7, y - 1, 13, 7, y - 1, 33, "minecraft:smooth_quartz"));
-		c.add(fill(-2, y, 12, 2, y + 3, 12, "minecraft:air"));
-		for (int x : new int[] {-5, 0, 5}) {
-			for (int z : new int[] {16, 22, 28}) {
-				c.add("setblock " + x + " " + (y + 7) + " " + z + " minecraft:sea_lantern");
-			}
-		}
-
-		// The start button: a lime panel in the north wall with a command block in the middle of it.
-		// A button pressed on a command block powers it.
-		c.add(fill(-2, y, -12, 2, y + 3, -12, "minecraft:lime_concrete"));
-		c.add("setblock 0 " + (y + 1) + " -12 minecraft:command_block{Command:\"imp start\",auto:0b,TrackOutput:0b}");
-		c.add("setblock 0 " + (y + 1) + " -11 minecraft:stone_button[face=wall,facing=south]");
-
+		c.addAll(lights(y));
 		c.addAll(decorations(y));
+		c.addAll(startConsole(y));
 		c.addAll(obstacleCourse(y));
 
 		c.addAll(roomTexts(y, rules));
 		c.addAll(kitTexts(y, rules));
-		c.addAll(hallwayTexts(y, rules));
+		c.addAll(corridorTexts(y, rules));
+		return c;
+	}
+
+	// ------------------------------------------------------------------ lights
+
+	/** Sea lanterns you can see, plus invisible light blocks, so nothing in the lobby is dark enough for mobs. */
+	private static List<String> lights(int y) {
+		List<String> c = new ArrayList<>();
+		for (int x : new int[] {-8, 0, 8}) {
+			for (int z : new int[] {-8, 0, 8}) {
+				c.add(set(x, y + 9, z, "minecraft:sea_lantern"));
+				c.add(set(x, y + 6, z, LIGHT));
+				c.add(set(x, y + 1, z, LIGHT));
+			}
+		}
+		for (int x : new int[] {-8, 0, 8}) {
+			for (int z : new int[] {20, 30, 40, 48}) {
+				c.add(set(x, y + 13, z, "minecraft:sea_lantern"));
+				c.add(set(x, y + 8, z, LIGHT));
+				c.add(set(x, y + 1, z, LIGHT));
+			}
+		}
+		for (int x : new int[] {-16, -22, -28, -32}) {
+			c.add(set(x, y + 4, 0, "minecraft:sea_lantern"));
+			c.add(set(x, y + 2, 0, LIGHT));
+		}
 		return c;
 	}
 
@@ -121,17 +158,25 @@ final class LobbyPlan {
 		List<String> c = new ArrayList<>();
 
 		// Room: inlaid floor, gold emblem in the middle, an orange stripe round the walls, corner pillars.
-		c.add(fill(-9, y - 1, -9, 9, y - 1, 9, "minecraft:polished_blackstone outline"));
+		c.addAll(ring(-9, 9, y - 1, -9, 9, "minecraft:polished_blackstone"));
+		c.addAll(ring(-7, 7, y - 1, -7, 7, "minecraft:gold_block"));
 		c.add(fill(-1, y - 1, -1, 1, y - 1, 1, "minecraft:gold_block"));
-		c.add(fill(-11, y + 6, -11, 11, y + 6, 11, "minecraft:orange_concrete outline"));
-		for (int sx : new int[] {-1, 1}) {
-			for (int sz : new int[] {-1, 1}) {
-				int x1 = sx < 0 ? -11 : 10;
-				int z1 = sz < 0 ? -11 : 10;
+		c.addAll(ring(-11, 11, y + 6, -11, 11, "minecraft:orange_concrete"));
+		for (int x1 : new int[] {-11, 10}) {
+			for (int z1 : new int[] {-11, 10}) {
 				c.add(fill(x1, y, z1, x1 + 1, y + 8, z1 + 1, "minecraft:quartz_pillar"));
 			}
 		}
-		// A carpet from the start button to the middle, a red runner to the hallway, two benches.
+		// Bookshelves under each wall panel, with a lantern on top.
+		for (int x : new int[] {-11, 11}) {
+			for (int zc : new int[] {-6, 6}) {
+				c.add(fill(x, y, zc - 3, x, y + 2, zc + 3, "minecraft:bookshelf"));
+				for (int dz : new int[] {-3, 0, 3}) {
+					c.add(set(x, y + 3, zc + dz, "minecraft:lantern"));
+				}
+			}
+		}
+		// A carpet from the start button to the middle, a red runner to the obstacle course, two benches.
 		c.add(fill(-1, y, -10, 1, y, -2, "minecraft:lime_carpet"));
 		c.add(fill(-1, y, 2, 1, y, 11, "minecraft:red_carpet"));
 		c.add(fill(-9, y, 9, -4, y, 9, "minecraft:quartz_slab"));
@@ -139,59 +184,64 @@ final class LobbyPlan {
 		// A skylight: only sky is visible through it, never the ground.
 		c.add(fill(-2, y + 9, -2, 2, y + 9, 2, "minecraft:glass"));
 
-		// Hallway: red runner and an orange stripe.
-		c.add(fill(-1, y, 13, 1, y, 33, "minecraft:red_carpet"));
-		c.add(fill(-7, y + 5, 13, 7, y + 5, 33, "minecraft:orange_concrete outline"));
+		// Obstacle course hall: a cyan stripe along the walls.
+		c.addAll(ring(-10, 10, y + 6, 13, 49, "minecraft:cyan_concrete"));
+		return c;
+	}
+
+	// ------------------------------------------------------------------ the start button
+
+	/**
+	 * A gold-framed emerald panel in the north wall with a button on it. The command block is hidden behind the
+	 * wall: a button powers the block it is stuck to, and that block powers the command block next to it.
+	 */
+	private static List<String> startConsole(int y) {
+		List<String> c = new ArrayList<>();
+		c.add(fill(-2, y, -12, 2, y + 3, -12, "minecraft:gold_block"));
+		c.add(fill(-1, y + 1, -12, 1, y + 2, -12, "minecraft:emerald_block"));
+		c.add(set(-3, y + 1, -12, "minecraft:sea_lantern"));
+		c.add(set(3, y + 1, -12, "minecraft:sea_lantern"));
+		c.add(set(0, y + 1, -13, "minecraft:command_block{Command:\"imp start\",auto:0b,TrackOutput:0b}"));
+		c.add(set(0, y + 1, -11, "minecraft:polished_blackstone_button[face=wall,facing=south]"));
 		return c;
 	}
 
 	// ------------------------------------------------------------------ obstacle course
 
 	/**
-	 * A parkour hall past the end of the hallway. It is closed and has a floor, and everybody in the lobby has
-	 * Resistance, so falling off only means walking back to the start. The course layer is y+3 (you stand on y+4).
+	 * A parkour hall that opens straight off the room's south wall. It is closed and has a floor, and everybody in
+	 * the lobby has Resistance, so falling off only means walking back to the start. The course layer is y+3
+	 * (you stand on y+4); nothing above it for 8 blocks.
 	 */
 	private static List<String> obstacleCourse(int y) {
 		List<String> c = new ArrayList<>();
 		int level = y + 3;
 
-		c.add(fill(-11, y - 1, 34, 11, y + 13, 72, "minecraft:black_concrete hollow"));
-		c.add(fill(-10, y - 1, 35, 10, y - 1, 71, "minecraft:light_blue_concrete"));
-		c.add(fill(-10, y + 6, 35, 10, y + 6, 71, "minecraft:cyan_concrete outline"));
-		c.add(fill(-2, y, 34, 2, y + 3, 34, "minecraft:air")); // the door from the hallway
-		for (int x : new int[] {-8, 0, 8}) {
-			for (int z : new int[] {42, 52, 62, 70}) {
-				c.add("setblock " + x + " " + (y + 13) + " " + z + " minecraft:sea_lantern");
-			}
-		}
-
 		// Stairs up to the start platform.
 		for (int k = 0; k < 4; k++) {
-			c.add(fill(-1, y, 36 + k, 1, y + k, 36 + k, "minecraft:blue_concrete"));
+			c.add(fill(-1, y, 14 + k, 1, y + k, 14 + k, "minecraft:blue_concrete"));
 		}
-		c.add(fill(-2, level, 39, 2, level, 41, "minecraft:lime_concrete"));
+		c.add(fill(-2, level, 17, 2, level, 19, "minecraft:lime_concrete"));
 
 		// 1. Stepping stones.
-		int[][] stones = {{0, 43}, {-1, 45}, {1, 47}, {-1, 49}, {1, 51}, {0, 53}};
+		int[][] stones = {{0, 21}, {-1, 23}, {1, 25}, {-1, 27}, {1, 29}, {0, 31}};
 		for (int[] s : stones) {
-			c.add("setblock " + s[0] + " " + level + " " + s[1] + " minecraft:cyan_concrete");
+			c.add(set(s[0], level, s[1], "minecraft:cyan_concrete"));
 		}
 		// 2. Slippery ice.
-		c.add(fill(-1, level, 55, 1, level, 59, "minecraft:packed_ice"));
+		c.add(fill(-1, level, 33, 1, level, 37, "minecraft:packed_ice"));
 		// 3. Climbing pillars.
-		c.add("setblock 0 " + (level + 1) + " 61 minecraft:orange_concrete");
-		c.add("setblock -1 " + (level + 2) + " 63 minecraft:orange_concrete");
-		c.add("setblock 1 " + (level + 3) + " 65 minecraft:orange_concrete");
+		c.add(set(0, level + 1, 39, "minecraft:orange_concrete"));
+		c.add(set(-1, level + 2, 41, "minecraft:orange_concrete"));
+		c.add(set(1, level + 3, 43, "minecraft:orange_concrete"));
 		// The finish.
-		c.add(fill(-2, level + 3, 67, 2, level + 3, 70, "minecraft:gold_block"));
+		c.add(fill(-2, level + 3, 45, 2, level + 3, 48, "minecraft:gold_block"));
 
-		c.add(display(0, y + 7.2, 40, 1.5, "center", 200,
+		c.add(display(0, y + 6.2, 18, 1.5, "center", 200,
 			new Text().add("OBSTACLE COURSE", "gold", true).nl()
 				.add("Falling is safe. Just walk back to the start.", "gray")));
-		c.add(display(0, y + 10.5, 69, 2, "center", 200,
+		c.add(display(0, y + 9.5, 47, 2, "center", 200,
 			new Text().add("YOU MADE IT!", "green", true)));
-		c.add(display(0, y + 3, 31, 1.2, "center", 200,
-			new Text().add("OBSTACLE COURSE ->", "gold", true)));
 		return c;
 	}
 
@@ -205,9 +255,9 @@ final class LobbyPlan {
 		List<String> c = new ArrayList<>();
 		int impostors = r.integer("impostors");
 
-		c.add(display(0, y + 6.8, -9, 3, "center", 200,
+		c.add(display(0, y + 6.0, -9, 3, "center", 200,
 			new Text().add("IMPOSTOR SMP", "gold", true)));
-		c.add(display(0, y + 4.6, -9, 1.4, "center", 200,
+		c.add(display(0, y + 4.3, -9, 1.2, "center", 200,
 			new Text().add("PRESS THE GREEN BUTTON", "green", true).nl()
 				.add("when everybody has joined", "gray")));
 
@@ -221,7 +271,7 @@ final class LobbyPlan {
 			win.add(", or become as many as the innocents left", "white");
 		}
 		win.nl().add("Impostors do not know each other.", "gray");
-		c.add(display(-8.5, y + 3.5, -3, 1, "left", 150, win));
+		c.add(display(-9.3, y + 2.5, -6, 1, "left", 140, win));
 
 		Text combat = new Text().add("COMBAT", "aqua", true).nl();
 		if (r.bool("impostor_pvp_gate")) {
@@ -249,13 +299,13 @@ final class LobbyPlan {
 			combat.add("Totems do not work.", "white").nl();
 		}
 		combat.add("Dead players become spectators.", "white");
-		c.add(display(8.5, y + 3.5, -3, 1, "left", 150, combat));
+		c.add(display(9.3, y + 2.5, -6, 1, "left", 140, combat));
 
 		Text commands = new Text().add("COMMANDS", "aqua", true).nl()
 			.add("/imp role", "yellow").add(" - see your role", "white").nl()
 			.add("/imp accuse <player>", "yellow").add(" - call somebody out", "white").nl()
 			.add("/imp accuse clear", "yellow").add(" - take it back", "white");
-		c.add(display(-8.5, y + 3.5, 5, 1, "left", 150, commands));
+		c.add(display(-9.3, y + 2.5, 6, 1, "left", 140, commands));
 
 		Text callouts = new Text().add("CALL-OUTS", "aqua", true).nl();
 		if (r.bool("accuse")) {
@@ -266,14 +316,18 @@ final class LobbyPlan {
 		} else {
 			callouts.add("Call-outs are turned off.", "gray");
 		}
-		c.add(display(8.5, y + 3.5, 5, 1, "left", 150, callouts));
+		c.add(display(9.3, y + 2.5, 6, 1, "left", 140, callouts));
+
+		// Small signs over the two doors.
+		c.add(display(0, y + 5.0, 10.5, 1.1, "center", 200, new Text().add("OBSTACLE COURSE", "gold", true)));
+		c.add(display(-10.3, y + 3.4, 0, 0.7, "center", 200, new Text().add("<- RULES (ON / OFF)", "gray")));
 		return c;
 	}
 
 	private static List<String> kitTexts(int y, Rules r) {
 		List<String> c = new ArrayList<>();
 		if (!r.bool("impostor_kit")) {
-			c.add(display(0, y + 4.5, 1, 1.5, "center", 200,
+			c.add(display(0, y + 3.5, 1, 1.5, "center", 200,
 				new Text().add("TRAP KITS ARE OFF", "red", true)));
 			return c;
 		}
@@ -283,14 +337,14 @@ final class LobbyPlan {
 		for (Kit.Entry e : Kit.FAST) {
 			fast.nl().add("- " + e.name(), "white");
 		}
-		c.add(display(-4, y + 4.5, 1, 0.9, "left", 130, fast));
+		c.add(display(-4, y + 3.5, 1, 0.9, "left", 130, fast));
 
 		Text singles = new Text().add(builders + " building slot" + (builders == 1 ? "" : "s") + ":", "gray");
 		for (Kit.Entry e : Kit.SINGLES) {
 			singles.nl().add("- " + e.name(), "white");
 		}
 		singles.nl().add("Each slot may be a SET instead (" + r.integer("impostor_kit_set_chance") + "%)", "yellow");
-		c.add(display(0, y + 4.5, 1, 0.9, "left", 130, singles));
+		c.add(display(0, y + 3.5, 1, 0.9, "left", 130, singles));
 
 		Text sets = new Text().add("READY-MADE SETS", "gold", true);
 		for (Kit.Entry e : Kit.BUNDLES) {
@@ -300,18 +354,13 @@ final class LobbyPlan {
 				sets.nl().add("  " + e.name().substring(paren + 2, e.name().length() - 1), "gray");
 			}
 		}
-		c.add(display(4, y + 4.5, 1, 0.9, "left", 130, sets));
+		c.add(display(4, y + 3.5, 1, 0.9, "left", 130, sets));
 		return c;
 	}
 
-	private static List<String> hallwayTexts(int y, Rules r) {
+	/** The rules, small and out of the way, inside the side corridor. */
+	private static List<String> corridorTexts(int y, Rules r) {
 		List<String> c = new ArrayList<>();
-		c.add(display(0, y + 5, 14.5, 1.6, "center", 200,
-			new Text().add("RULES HALLWAY", "gold", true).nl()
-				.add("ON", "green", true).add(" = enabled   ", "white")
-				.add("OFF", "red", true).add(" = disabled   ", "white")
-				.add("12", "yellow", true).add(" = a number", "white")));
-
 		List<RulesLayout.Section> sections = RulesLayout.sections(Rules.DEFS);
 		for (int i = 0; i < sections.size(); i++) {
 			RulesLayout.Section section = sections.get(i);
@@ -326,9 +375,9 @@ final class LobbyPlan {
 				}
 				t.add(def.name(), "white");
 			}
-			double x = (i % 2 == 0 ? -1 : 1) * 4.6;
-			double z = 18 + Math.min(i / 2, 2) * 6;
-			c.add(display(x, y + 2.9, z, 0.8, "left", 220, t));
+			double x = -15.5 - 3.4 * i;
+			double z = i % 2 == 0 ? -1.25 : 1.25;
+			c.add(display(x, y + 2.0, z, 0.6, "left", 170, t));
 		}
 		return c;
 	}

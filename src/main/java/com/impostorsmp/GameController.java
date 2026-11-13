@@ -84,6 +84,9 @@ public final class GameController {
 		if (rules.bool("block_totems")) {
 			stripTotems();
 		}
+		if (server.getTickCount() % 20 == 0 && rules.lobbyY() >= 0) {
+			purgeLobbyMobs();
+		}
 		if (state.phase() == Phase.RUNNING) {
 			state.addTicks(1);
 			if (!state.pvpUnlocked() && rules.bool("impostor_pvp_gate")) {
@@ -556,7 +559,7 @@ public final class GameController {
 
 	// ------------------------------------------------------------------ the sky lobby
 
-	private static final int[][] LOBBY_CORNERS = {{-12, -12}, {12, -12}, {-12, 80}, {12, 80}};
+	private static final int[][] LOBBY_CORNERS = {{-36, -13}, {12, -13}, {-36, 80}, {12, 80}};
 
 	/** Builds the lobby (after the chunks are loaded), moves everybody into it and makes it the world spawn. */
 	public void createLobby() {
@@ -631,16 +634,24 @@ public final class GameController {
 		return false;
 	}
 
-	/** Takes the lobby down without starting a game: everybody goes to survival and lands near 0,0. */
-	public void removeLobbyNow() {
+	/** Anything that is not a player, a text or an item is removed from the lobby once a second (mobs, mostly). */
+	private void purgeLobbyMobs() {
 		int y = rules.lobbyY();
-		if (y < 0) {
-			throw new IllegalStateException("There is no lobby.");
-		}
+		Fx.run(server, "kill @e[type=!minecraft:player,type=!minecraft:text_display,type=!minecraft:item,"
+			+ "type=!minecraft:armor_stand,x=-36,y=" + (y - 2) + ",z=-14,dx=50,dy=24,dz=70]");
+	}
+
+	/**
+	 * Takes the lobby down without starting a game: everybody goes to survival and is moved to the ground away
+	 * from the lobby first (spreading around 0,0 would drop people on the lobby roof). Works even if the mod
+	 * forgot where the lobby was, by using the lobby_y rule.
+	 */
+	public void removeLobbyNow() {
+		int y = rules.lobbyY() >= 0 ? rules.lobbyY() : rules.integer("lobby_y");
 		Fx.run(server, "gamemode survival @a[gamemode=adventure]");
 		Fx.run(server, "effect clear @a minecraft:resistance");
-			Fx.run(server, "effect clear @a minecraft:saturation");
-		Fx.run(server, "spreadplayers 0 0 0 30 false @a[gamemode=!spectator]");
+		Fx.run(server, "effect clear @a minecraft:saturation");
+		Fx.run(server, "spreadplayers 100 100 0 40 false @a[gamemode=!spectator]");
 		if (anyoneInLobby(y)) {
 			throw new IllegalStateException("Could not move everybody out, so the lobby was kept.");
 		}
