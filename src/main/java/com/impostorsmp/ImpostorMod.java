@@ -45,6 +45,9 @@ public class ImpostorMod implements ModInitializer {
 			}
 		});
 
+		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) ->
+			controller == null || controller.allowDamage(entity, source));
+
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
 			if (controller != null) {
 				controller.onDeath(entity, source);

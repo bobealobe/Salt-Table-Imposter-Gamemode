@@ -7,7 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +63,20 @@ public final class GameState {
 	private Phase phase = Phase.IDLE;
 	private Outcome outcome = Outcome.NONE;
 	private long worldSeed;
+
+	// Things that change during a game and must survive a restart.
+	private boolean pvpUnlocked;
+	private long elapsedTicks;
+	private final Set<UUID> exposed = new LinkedHashSet<>();
+	private final Set<UUID> cleared = new LinkedHashSet<>();
+	private final Map<UUID, UUID> votes = new LinkedHashMap<>(); // accuser -> accused
+	private final Map<UUID, Integer> strikes = new HashMap<>();
+
+	public enum AccuseStatus { NOT_RUNNING, ACCUSER_OUT, TARGET_INVALID, ALREADY_KNOWN, VOTE, EXPOSED, CLEARED }
+
+	/** What happened to an accusation. {@code accusers} is filled when it was settled (EXPOSED or CLEARED). */
+	public record AccuseResult(AccuseStatus status, int votes, int needed, List<UUID> accusers) {
+	}
 
 	public Phase phase() {
 		return phase;
@@ -126,6 +142,7 @@ public final class GameState {
 		Set<UUID> impostors = new HashSet<>(ids.subList(0, impostorCount));
 
 		members.clear();
+		clearExtras();
 		for (Map.Entry<UUID, String> e : players.entrySet()) {
 			Role role = impostors.contains(e.getKey()) ? Role.IMPOSTOR : Role.INNOCENT;
 			members.put(e.getKey(), new Member(e.getKey(), e.getValue(), role));
@@ -151,7 +168,130 @@ public final class GameState {
 			return false;
 		}
 		m.alive = false;
+		// A dead player's votes disappear, and so do the votes against them.
+		votes.remove(id);
+		votes.values().removeIf(target -> target.equals(id));
 		return true;
+	}
+
+	private void clearExtras() {
+		pvpUnlocked = false;
+		elapsedTicks = 0;
+		exposed.clear();
+		cleared.clear();
+		votes.clear();
+		strikes.clear();
+	}
+
+	// ---- impostor PvP gate ----
+
+	public boolean pvpUnlocked() {
+		return pvpUnlocked;
+	}
+
+	public void unlockPvp() {
+		pvpUnlocked = true;
+	}
+
+	/** Game time in ticks, counted only while the game is running. */
+	public long elapsedTicks() {
+		return elapsedTicks;
+	}
+
+	public void addTicks(long ticks) {
+		elapsedTicks += ticks;
+	}
+
+	public boolean exposed(UUID id) {
+		return exposed.contains(id);
+	}
+
+	public boolean cleared(UUID id) {
+		return cleared.contains(id);
+	}
+
+	/** True if this player may attack others directly: everybody but impostors, and impostors once unlocked or exposed. */
+	public boolean mayAttack(UUID id) {
+		Member m = members.get(id);
+		if (m == null || m.role != Role.IMPOSTOR) {
+			return true;
+		}
+		return pvpUnlocked || exposed.contains(id);
+	}
+
+	// ---- RDM strikes ----
+
+	/** Adds one strike and returns the new total. */
+	public int addStrike(UUID id) {
+		return strikes.merge(id, 1, Integer::sum);
+	}
+
+	public int strikes(UUID id) {
+		return strikes.getOrDefault(id, 0);
+	}
+
+	// ---- accusations ----
+
+	/** How many votes a call-out needs right now: the threshold, but never more than the people left who could vote. */
+	public int votesNeeded(int threshold) {
+		int alive = alive(Role.IMPOSTOR) + alive(Role.INNOCENT);
+		return Math.max(1, Math.min(threshold, alive - 1));
+	}
+
+	public int votesAgainst(UUID target) {
+		int n = 0;
+		for (UUID t : votes.values()) {
+			if (t.equals(target)) {
+				n++;
+			}
+		}
+		return n;
+	}
+
+	/**
+	 * Records that {@code accuser} accuses {@code target} (replacing any earlier accusation by them).
+	 * When enough living players accuse the same person, that person's role is settled: an impostor is
+	 * EXPOSED, an innocent is CLEARED and the accusers are returned so they can be punished.
+	 */
+	public AccuseResult accuse(UUID accuser, UUID target, int threshold) {
+		int needed = votesNeeded(threshold);
+		if (phase != Phase.RUNNING) {
+			return new AccuseResult(AccuseStatus.NOT_RUNNING, 0, needed, List.of());
+		}
+		Member a = members.get(accuser);
+		if (a == null || !a.alive) {
+			return new AccuseResult(AccuseStatus.ACCUSER_OUT, 0, needed, List.of());
+		}
+		Member t = members.get(target);
+		if (t == null || !t.alive || accuser.equals(target)) {
+			return new AccuseResult(AccuseStatus.TARGET_INVALID, 0, needed, List.of());
+		}
+		if (exposed.contains(target) || cleared.contains(target)) {
+			return new AccuseResult(AccuseStatus.ALREADY_KNOWN, votesAgainst(target), needed, List.of());
+		}
+		votes.put(accuser, target);
+		int count = votesAgainst(target);
+		if (count < needed) {
+			return new AccuseResult(AccuseStatus.VOTE, count, needed, List.of());
+		}
+		List<UUID> accusers = new ArrayList<>();
+		for (Map.Entry<UUID, UUID> e : votes.entrySet()) {
+			if (e.getValue().equals(target)) {
+				accusers.add(e.getKey());
+			}
+		}
+		votes.values().removeIf(v -> v.equals(target));
+		if (t.role == Role.IMPOSTOR) {
+			exposed.add(target);
+			return new AccuseResult(AccuseStatus.EXPOSED, count, needed, accusers);
+		}
+		cleared.add(target);
+		return new AccuseResult(AccuseStatus.CLEARED, count, needed, accusers);
+	}
+
+	/** Takes back your own accusation. Returns true if you had one. */
+	public boolean clearVote(UUID accuser) {
+		return votes.remove(accuser) != null;
 	}
 
 	/**
@@ -159,13 +299,26 @@ public final class GameState {
 	 * the innocents win, because the impostors are gone.
 	 */
 	public Outcome evaluate() {
+		return evaluate(false);
+	}
+
+	/**
+	 * Same as {@link #evaluate()}, but with {@code parity} on the impostors also win as soon as they are
+	 * at least as many as the innocents who are left (they can no longer be outvoted or outfought).
+	 */
+	public Outcome evaluate(boolean parity) {
 		if (phase != Phase.RUNNING) {
 			return Outcome.NONE;
 		}
-		if (alive(Role.IMPOSTOR) == 0) {
+		int imps = alive(Role.IMPOSTOR);
+		int inns = alive(Role.INNOCENT);
+		if (imps == 0) {
 			return Outcome.INNOCENTS;
 		}
-		if (alive(Role.INNOCENT) == 0) {
+		if (inns == 0) {
+			return Outcome.IMPOSTORS;
+		}
+		if (parity && imps >= inns) {
 			return Outcome.IMPOSTORS;
 		}
 		return Outcome.NONE;
@@ -178,6 +331,7 @@ public final class GameState {
 
 	public void reset() {
 		members.clear();
+		clearExtras();
 		phase = Phase.IDLE;
 		outcome = Outcome.NONE;
 	}
@@ -198,6 +352,24 @@ public final class GameState {
 			p.setProperty("m." + i + ".alive", Boolean.toString(m.alive));
 			i++;
 		}
+		p.setProperty("pvp", Boolean.toString(pvpUnlocked));
+		p.setProperty("elapsed", Long.toString(elapsedTicks));
+		p.setProperty("exposed", join(exposed));
+		p.setProperty("cleared", join(cleared));
+		p.setProperty("votes", Integer.toString(votes.size()));
+		int v = 0;
+		for (Map.Entry<UUID, UUID> e : votes.entrySet()) {
+			p.setProperty("v." + v + ".from", e.getKey().toString());
+			p.setProperty("v." + v + ".to", e.getValue().toString());
+			v++;
+		}
+		p.setProperty("strikes", Integer.toString(strikes.size()));
+		int k = 0;
+		for (Map.Entry<UUID, Integer> e : strikes.entrySet()) {
+			p.setProperty("s." + k + ".id", e.getKey().toString());
+			p.setProperty("s." + k + ".n", e.getValue().toString());
+			k++;
+		}
 		try {
 			Path parent = file.getParent();
 			if (parent != null) {
@@ -209,6 +381,27 @@ public final class GameState {
 		} catch (IOException e) {
 			ImpostorLog.warn("Could not save " + file + ": " + e.getMessage());
 		}
+	}
+
+	private static String join(Set<UUID> ids) {
+		StringBuilder sb = new StringBuilder();
+		for (UUID id : ids) {
+			if (sb.length() > 0) {
+				sb.append(',');
+			}
+			sb.append(id);
+		}
+		return sb.toString();
+	}
+
+	private static List<UUID> split(String text) {
+		List<UUID> out = new ArrayList<>();
+		for (String part : text.split(",")) {
+			if (!part.isBlank()) {
+				out.add(UUID.fromString(part.trim()));
+			}
+		}
+		return out;
 	}
 
 	/** Loads a saved state, or returns a fresh idle one if there is no usable file. */
@@ -230,6 +423,18 @@ public final class GameState {
 					Role.valueOf(p.getProperty("m." + i + ".role")));
 				m.alive = Boolean.parseBoolean(p.getProperty("m." + i + ".alive", "true"));
 				state.members.put(id, m);
+			}
+			state.pvpUnlocked = Boolean.parseBoolean(p.getProperty("pvp", "false"));
+			state.elapsedTicks = Long.parseLong(p.getProperty("elapsed", "0"));
+			state.exposed.addAll(split(p.getProperty("exposed", "")));
+			state.cleared.addAll(split(p.getProperty("cleared", "")));
+			int voteCount = Integer.parseInt(p.getProperty("votes", "0"));
+			for (int i = 0; i < voteCount; i++) {
+				state.votes.put(UUID.fromString(p.getProperty("v." + i + ".from")), UUID.fromString(p.getProperty("v." + i + ".to")));
+			}
+			int strikeCount = Integer.parseInt(p.getProperty("strikes", "0"));
+			for (int i = 0; i < strikeCount; i++) {
+				state.strikes.put(UUID.fromString(p.getProperty("s." + i + ".id")), Integer.parseInt(p.getProperty("s." + i + ".n")));
 			}
 		} catch (IOException | RuntimeException e) {
 			ImpostorLog.warn("Ignoring unreadable game state file " + file + ": " + e);

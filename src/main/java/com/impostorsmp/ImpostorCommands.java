@@ -10,9 +10,11 @@ import com.impostorsmp.GameState.Role;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
@@ -25,6 +27,7 @@ import net.fabricmc.fabric.api.permission.v1.PermissionPredicates;
  * /imp ...
  *   role                  anybody: shows your own role
  *   start / stop          host: begin or cancel a game
+ *   accuse <player>       anybody: call somebody out (accuse clear takes it back)
  *   status / reveal       host: progress / everybody's roles (only after the game ends)
  *   rules / rule <name> [value]   host: look at or change the rules
  *   lock / unlock         host: make yourself the only one who can use the host commands
@@ -44,6 +47,10 @@ final class ImpostorCommands {
 			LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("imp");
 			root.executes(ctx -> help(ctx.getSource()));
 			root.then(Commands.literal("role").executes(ctx -> role(ctx.getSource())));
+			root.then(Commands.literal("accuse")
+				.then(Commands.literal("clear").executes(ctx -> clearAccusation(ctx.getSource())))
+				.then(Commands.argument("player", EntityArgument.player())
+					.executes(ctx -> accuse(ctx.getSource(), EntityArgument.getPlayer(ctx, "player")))));
 			root.then(admin("start").executes(ctx -> start(ctx.getSource())));
 			root.then(admin("stop").executes(ctx -> stop(ctx.getSource())));
 			root.then(admin("status").executes(ctx -> status(ctx.getSource())));
@@ -115,6 +122,7 @@ final class ImpostorCommands {
 
 	private static int help(CommandSourceStack src) {
 		say(src, "/imp role - see your own role");
+		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
 	}
@@ -141,6 +149,25 @@ final class ImpostorCommands {
 			say(src, "You are " + (member.role() == Role.IMPOSTOR ? "an IMPOSTOR" : "INNOCENT")
 				+ (member.alive() ? "." : " (dead)."));
 		}
+		return 1;
+	}
+
+	private static int accuse(CommandSourceStack src, ServerPlayer target) throws CommandSyntaxException {
+		GameController game = game(src);
+		if (game == null) {
+			return 0;
+		}
+		ServerPlayer player = src.getPlayerOrException();
+		game.accuse(player, target);
+		return 1;
+	}
+
+	private static int clearAccusation(CommandSourceStack src) throws CommandSyntaxException {
+		GameController game = game(src);
+		if (game == null) {
+			return 0;
+		}
+		game.clearAccusation(src.getPlayerOrException());
 		return 1;
 	}
 
@@ -179,6 +206,9 @@ final class ImpostorCommands {
 		say(src, "Phase: " + state.phase() + (state.phase() == Phase.IDLE ? "" : ", players alive: " + alive + "/" + total));
 		if (state.phase() == Phase.ENDED) {
 			say(src, "Winner: " + state.outcome());
+		}
+		if (state.phase() == Phase.RUNNING) {
+			say(src, game.pvpStatus());
 		}
 		return 1;
 	}
