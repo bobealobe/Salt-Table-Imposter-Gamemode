@@ -65,8 +65,6 @@ public final class GameState {
 	private long worldSeed;
 
 	// Things that change during a game and must survive a restart.
-	private boolean pvpUnlocked;
-	private long elapsedTicks;
 	private final Set<UUID> exposed = new LinkedHashSet<>();
 	private final Set<UUID> cleared = new LinkedHashSet<>();
 	private final Map<UUID, UUID> votes = new LinkedHashMap<>(); // accuser -> accused
@@ -206,32 +204,13 @@ public final class GameState {
 	}
 
 	private void clearExtras() {
-		pvpUnlocked = false;
-		elapsedTicks = 0;
 		exposed.clear();
 		cleared.clear();
 		votes.clear();
 		strikes.clear();
 	}
 
-	// ---- impostor PvP gate ----
-
-	public boolean pvpUnlocked() {
-		return pvpUnlocked;
-	}
-
-	public void unlockPvp() {
-		pvpUnlocked = true;
-	}
-
-	/** Game time in ticks, counted only while the game is running. */
-	public long elapsedTicks() {
-		return elapsedTicks;
-	}
-
-	public void addTicks(long ticks) {
-		elapsedTicks += ticks;
-	}
+	// ---- call-out results ----
 
 	public boolean exposed(UUID id) {
 		return exposed.contains(id);
@@ -239,15 +218,6 @@ public final class GameState {
 
 	public boolean cleared(UUID id) {
 		return cleared.contains(id);
-	}
-
-	/** True if this player may attack others directly: everybody but impostors, and impostors once unlocked or exposed. */
-	public boolean mayAttack(UUID id) {
-		Member m = members.get(id);
-		if (m == null || m.role != Role.IMPOSTOR) {
-			return true;
-		}
-		return pvpUnlocked || exposed.contains(id);
 	}
 
 	// ---- RDM strikes ----
@@ -383,8 +353,6 @@ public final class GameState {
 			p.setProperty("m." + i + ".alive", Boolean.toString(m.alive));
 			i++;
 		}
-		p.setProperty("pvp", Boolean.toString(pvpUnlocked));
-		p.setProperty("elapsed", Long.toString(elapsedTicks));
 		p.setProperty("exposed", join(exposed));
 		p.setProperty("cleared", join(cleared));
 		p.setProperty("votes", Integer.toString(votes.size()));
@@ -455,8 +423,6 @@ public final class GameState {
 				m.alive = Boolean.parseBoolean(p.getProperty("m." + i + ".alive", "true"));
 				state.members.put(id, m);
 			}
-			state.pvpUnlocked = Boolean.parseBoolean(p.getProperty("pvp", "false"));
-			state.elapsedTicks = Long.parseLong(p.getProperty("elapsed", "0"));
 			state.exposed.addAll(split(p.getProperty("exposed", "")));
 			state.cleared.addAll(split(p.getProperty("cleared", "")));
 			int voteCount = Integer.parseInt(p.getProperty("votes", "0"));

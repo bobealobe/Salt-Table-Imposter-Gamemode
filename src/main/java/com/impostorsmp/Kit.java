@@ -32,9 +32,8 @@ final class Kit {
 		one("pointed_dripstone", 6, "Pointed dripstone x6", 1));
 
 	static final List<Entry> SINGLES = List.of(
-		one("piston", 12, "Piston x12", 3),
+		one("sticky_piston", 12, "Sticky piston x12", 3),
 		one("observer", 12, "Observer x12", 3),
-		one("sticky_piston", 8, "Sticky piston x8", 2),
 		one("redstone", 32, "Redstone dust x32", 2),
 		one("repeater", 4, "Repeater x4", 1),
 		one("tnt", 6, "TNT x6", 2),
@@ -43,14 +42,14 @@ final class Kit {
 
 	/** Ready-made sets. Each one has enough in it to build a trap of that kind. */
 	static final List<Entry> BUNDLES = List.of(
-		new Entry("Piston trap set (8 piston, 8 observer, 20 redstone dust)",
-			List.of(i("piston", 8), i("observer", 8), i("redstone", 20)), 3),
-		new Entry("Crusher set (6 sticky piston, 4 slime block, 6 observer, 16 redstone dust)",
-			List.of(i("sticky_piston", 6), i("slime_block", 4), i("observer", 6), i("redstone", 16)), 2),
-		new Entry("TNT set (5 TNT, 4 observer, 12 redstone dust, 2 repeater)",
-			List.of(i("tnt", 5), i("observer", 4), i("redstone", 12), i("repeater", 2)), 2),
-		new Entry("Minecart set (3 TNT minecart, 16 rail, 4 powered rail, 8 redstone dust)",
-			List.of(i("tnt_minecart", 3), i("rail", 16), i("powered_rail", 4), i("redstone", 8)), 2));
+		new Entry("Piston trap set (8 sticky piston, 8 observer, 20 redstone dust, 4 repeater)",
+			List.of(i("sticky_piston", 8), i("observer", 8), i("redstone", 20), i("repeater", 4)), 3),
+		new Entry("Pitfall set (16 scaffolding, 4 observer, 4 sticky piston)",
+			List.of(i("scaffolding", 16), i("observer", 4), i("sticky_piston", 4)), 2),
+		new Entry("TNT set (5 TNT, 4 observer, 12 redstone dust)",
+			List.of(i("tnt", 5), i("observer", 4), i("redstone", 12)), 2),
+		new Entry("Minecart set (3 TNT minecart, 16 rail, 4 powered rail)",
+			List.of(i("tnt_minecart", 3), i("rail", 16), i("powered_rail", 4)), 2));
 
 	private Kit() {
 	}

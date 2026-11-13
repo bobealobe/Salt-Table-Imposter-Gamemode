@@ -90,12 +90,19 @@ final class LobbyPlan {
 	static List<String> remove(int y) {
 		List<String> c = new ArrayList<>();
 		c.add("kill @e[type=minecraft:text_display,tag=" + TAG + "]");
+		// Carpets, lanterns and buttons first: if their support went first they would break and drop as items.
+		for (String fragile : new String[] {"minecraft:lime_carpet", "minecraft:red_carpet", "minecraft:lantern",
+			"minecraft:polished_blackstone_button"}) {
+			c.add(fill(-11, y, -11, 11, y + 4, 11, "minecraft:air replace " + fragile));
+		}
 		c.add(fill(-12, y - 1, -12, 12, y + 9, 12, "minecraft:air")); // the room
 		c.add(fill(-11, y - 1, 12, 11, y + 13, 50, "minecraft:air")); // the obstacle course
 		c.add(fill(-34, y - 1, -3, -12, y + 4, 3, "minecraft:air")); // the rules corridor
 		c.add(set(0, y + 1, -13, "minecraft:air")); // the hidden command block behind the start button
 		c.add(fill(-8, y - 1, 12, 8, y + 7, 34, "minecraft:air")); // older version: hallway
 		c.add(fill(-11, y - 1, 34, 11, y + 13, 72, "minecraft:air")); // older version: obstacle course
+		// Anything that was dropped by an earlier removal.
+		c.add("kill @e[type=minecraft:item,x=-36,y=" + (y - 2) + ",z=-14,dx=50,dy=24,dz=70]");
 		return c;
 	}
 
@@ -216,28 +223,27 @@ final class LobbyPlan {
 	}
 
 	/**
-	 * The course in order, start to finish. It winds across the hall: stepping stones, ice, a row of stones to
-	 * the east, then climbing pillars back west to the gold finish platform. Every jump is one block or two
-	 * of air and at most one block up.
+	 * The course in order, start to finish. It winds across the hall in an S shape. Every jump is a 3 or 4 block
+	 * jump (2 or 3 blocks of air), the last three climb one block each, and the stones are far enough from the
+	 * ones before and after that none can be skipped.
 	 */
 	static final List<Node> COURSE = List.of(
 		new Node(Course.START_X1, Course.START_Z1, Course.START_X2, Course.START_Z2, Course.START_DY, "minecraft:lime_concrete"),
-		stone(0, 21, 3, "minecraft:cyan_concrete"),
-		stone(-1, 23, 3, "minecraft:cyan_concrete"),
-		stone(1, 25, 3, "minecraft:cyan_concrete"),
-		stone(-1, 27, 3, "minecraft:cyan_concrete"),
-		stone(1, 29, 3, "minecraft:cyan_concrete"),
-		stone(0, 31, 3, "minecraft:cyan_concrete"),
-		new Node(-1, 33, 1, 35, 3, "minecraft:packed_ice"),
-		stone(3, 36, 3, "minecraft:white_concrete"),
-		stone(5, 37, 3, "minecraft:white_concrete"),
-		stone(7, 36, 3, "minecraft:white_concrete"),
-		stone(9, 37, 3, "minecraft:white_concrete"),
-		stone(9, 39, 4, "minecraft:orange_concrete"),
-		stone(7, 40, 5, "minecraft:orange_concrete"),
-		stone(5, 39, 6, "minecraft:orange_concrete"),
-		stone(3, 40, 6, "minecraft:orange_concrete"),
-		stone(1, 41, 6, "minecraft:orange_concrete"),
+		stone(5, 21, 3, "minecraft:cyan_concrete"),
+		stone(9, 22, 3, "minecraft:cyan_concrete"),
+		stone(8, 26, 3, "minecraft:cyan_concrete"),
+		stone(5, 28, 3, "minecraft:cyan_concrete"),
+		stone(1, 29, 3, "minecraft:packed_ice"),
+		stone(-3, 29, 3, "minecraft:packed_ice"),
+		stone(-7, 29, 3, "minecraft:cyan_concrete"),
+		stone(-9, 32, 3, "minecraft:cyan_concrete"),
+		stone(-6, 35, 3, "minecraft:white_concrete"),
+		stone(-2, 36, 3, "minecraft:white_concrete"),
+		stone(2, 36, 3, "minecraft:white_concrete"),
+		stone(6, 37, 3, "minecraft:white_concrete"),
+		stone(9, 38, 4, "minecraft:orange_concrete"),
+		stone(9, 41, 5, "minecraft:orange_concrete"),
+		stone(6, 42, 6, "minecraft:orange_concrete"),
 		new Node(Course.FINISH_X1, Course.FINISH_Z1, Course.FINISH_X2, Course.FINISH_Z2, Course.FINISH_DY, "minecraft:gold_block"));
 
 	/**
@@ -292,33 +298,19 @@ final class LobbyPlan {
 		win.nl().add("Impostors do not know each other.", "gray");
 		c.add(display(-9.3, y + 2.5, -6, 1, "left", 140, win));
 
-		Text combat = new Text().add("COMBAT", "aqua", true).nl();
-		if (r.bool("impostor_pvp_gate")) {
-			combat.add("Impostors cannot hit you directly until ", "white");
-			int minutes = r.integer("impostor_pvp_minutes");
-			boolean nether = r.bool("impostor_pvp_on_nether");
-			if (minutes > 0) {
-				combat.add(minutes + " minutes pass", "yellow");
-				combat.add(nether ? " or someone enters the Nether" : "", "yellow");
-				combat.add(", or they are called out.", "white").nl();
-			} else if (nether) {
-				combat.add("someone enters the Nether", "yellow");
-				combat.add(", or they are called out.", "white").nl();
-			} else {
-				combat.add("they are called out.", "white").nl();
-			}
-			combat.add("Traps, lava, TNT and spleefing always work.", "gray").nl();
-		} else {
-			combat.add("Impostors may fight right away.", "white").nl();
+		Text know = new Text().add("GOOD TO KNOW", "aqua", true);
+		if (r.bool("impostor_kit")) {
+			know.nl().add("Impostors start with a secret trap kit.", "white");
 		}
+		know.nl().add("Traps, lava, TNT and spleefing are all fair game.", "white");
 		if (r.bool("anti_rdm")) {
-			combat.add("Innocent kills innocent: ", "white").add("punished", "red").nl();
+			know.nl().add("An innocent who kills an innocent is ", "white").add("punished", "red").add(".", "white");
 		}
 		if (r.bool("block_totems")) {
-			combat.add("Totems do not work.", "white").nl();
+			know.nl().add("Totems do not work.", "white");
 		}
-		combat.add("Dead players become spectators.", "white");
-		c.add(display(9.3, y + 2.5, -6, 1, "left", 140, combat));
+		know.nl().add("Dead players become spectators.", "white");
+		c.add(display(9.3, y + 2.5, -6, 1, "left", 140, know));
 
 		Text commands = new Text().add("COMMANDS", "aqua", true).nl()
 			.add("/imp role", "yellow").add(" - see your role", "white").nl()

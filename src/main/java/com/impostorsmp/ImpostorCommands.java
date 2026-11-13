@@ -55,7 +55,6 @@ final class ImpostorCommands {
 			root.then(admin("test")
 				.then(Commands.literal("impostor").executes(ctx -> startTest(ctx.getSource(), Role.IMPOSTOR)))
 				.then(Commands.literal("innocent").executes(ctx -> startTest(ctx.getSource(), Role.INNOCENT)))
-				.then(Commands.literal("unlock").executes(ctx -> testUnlock(ctx.getSource())))
 				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource()))));
 			root.then(admin("lobby")
 				.executes(ctx -> lobby(ctx.getSource()))
@@ -131,7 +130,7 @@ final class ImpostorCommands {
 	private static int help(CommandSourceStack src) {
 		say(src, "/imp role - see your own role");
 		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
-		say(src, "Solo test (host): /imp test impostor | innocent | unlock | kit");
+		say(src, "Solo test (host): /imp test impostor | innocent | kit");
 		say(src, "Lobby (host): /imp lobby builds a sky lobby with a start button, /imp lobby remove takes it down");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
@@ -221,18 +220,6 @@ final class ImpostorCommands {
 		return 1;
 	}
 
-	private static int testUnlock(CommandSourceStack src) {
-		GameController game = game(src);
-		if (game == null || !allowed(src, game)) {
-			return 0;
-		}
-		if (!game.forceUnlockPvp()) {
-			src.sendFailure(Component.literal("Needs a running game with impostor PvP still locked."));
-			return 0;
-		}
-		return 1;
-	}
-
 	private static int testKit(CommandSourceStack src) {
 		GameController game = game(src);
 		if (game == null || !allowed(src, game)) {
@@ -295,9 +282,6 @@ final class ImpostorCommands {
 		say(src, "Phase: " + state.phase() + (state.phase() == Phase.IDLE ? "" : ", players alive: " + alive + "/" + total));
 		if (state.phase() == Phase.ENDED) {
 			say(src, "Winner: " + state.outcome());
-		}
-		if (state.phase() == Phase.RUNNING) {
-			say(src, game.pvpStatus());
 		}
 		return 1;
 	}

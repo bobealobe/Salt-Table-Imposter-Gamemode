@@ -2,7 +2,6 @@ package com.impostorsmp;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,10 +28,8 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.Level;
 
 /** Runs the actual game: picking roles, the countdown, deaths, win conditions. One per world that is opened. */
 public final class GameController {
@@ -41,9 +38,6 @@ public final class GameController {
 	private final GameState state;
 	private final Scheduler scheduler = new Scheduler();
 	private final Path statePath;
-	/** "attacker>victim" to the server tick of the last hit, used for the self-defence exception. */
-	private final Map<String, Integer> recentHits = new HashMap<>();
-	private int lastGateWarning = -100;
 	private final Course course = new Course();
 
 	GameController(MinecraftServer server, Path configDir) {
@@ -94,92 +88,6 @@ public final class GameController {
 			}
 			tickCourse(lobby);
 		}
-		if (state.phase() == Phase.RUNNING) {
-			state.addTicks(1);
-			if (!state.pvpUnlocked() && rules.bool("impostor_pvp_gate")) {
-				checkPvpUnlock();
-			}
-			if (state.elapsedTicks() % 1200 == 0) {
-				save(); // keeps the timer safe if the world is closed suddenly
-			}
-		}
-	}
-
-	// ------------------------------------------------------------------ impostor PvP gate
-
-	private void checkPvpUnlock() {
-		int minutes = rules.integer("impostor_pvp_minutes");
-		if (minutes > 0 && state.elapsedTicks() >= minutes * 1200L) {
-			unlockPvp(minutes + " minutes have passed.");
-			return;
-		}
-		if (rules.bool("impostor_pvp_on_nether") && state.elapsedTicks() % 20 == 0) {
-			for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-				boolean alive = state.member(p.getUUID()).map(Member::alive).orElse(false);
-				if (alive && p.level().dimension().equals(Level.NETHER)) {
-					unlockPvp("Somebody entered the Nether.");
-					return;
-				}
-			}
-		}
-	}
-
-	private void unlockPvp(String reason) {
-		state.unlockPvp();
-		save();
-		broadcast(Component.literal("Impostors can now attack players directly. " + reason).withStyle(ChatFormatting.RED));
-		Fx.times(server, "@a", 5, 60, 20);
-		Fx.subtitle(server, "@a", Fx.text(reason, "gray", false));
-		Fx.title(server, "@a", Fx.text("Impostor PvP is unlocked", "red", true));
-		Fx.sound(server, "@a", "minecraft:block.bell.use", 1.0, 0.7);
-	}
-
-	/** One line for /imp status. */
-	String pvpStatus() {
-		if (!rules.bool("impostor_pvp_gate")) {
-			return "Impostor PvP: always allowed (gate is off).";
-		}
-		if (state.pvpUnlocked()) {
-			return "Impostor PvP: UNLOCKED.";
-		}
-		int minutes = rules.integer("impostor_pvp_minutes");
-		String timer = minutes > 0
-			? "unlocks in " + Math.max(0, minutes - (int) (state.elapsedTicks() / 1200)) + " min"
-			: "no timer";
-		return "Impostor PvP: locked (" + timer + (rules.bool("impostor_pvp_on_nether") ? ", or when somebody enters the Nether" : "") + ").";
-	}
-
-	/**
-	 * Called for every hit. Returns false to cancel it. Only direct hits (swords, fists, arrows and other
-	 * projectiles) from a gated impostor are blocked; traps, lava, fire, TNT, pistons and falls always work.
-	 */
-	boolean allowDamage(LivingEntity victim, DamageSource source) {
-		if (!(victim instanceof ServerPlayer target) || state.phase() != Phase.RUNNING) {
-			return true;
-		}
-		if (!(source.getEntity() instanceof ServerPlayer attacker) || attacker == target) {
-			return true;
-		}
-		Entity direct = source.getDirectEntity();
-		if (direct != attacker && !(direct instanceof Projectile)) {
-			return true; // an explosion, a trap and so on
-		}
-		Member attackerMember = state.member(attacker.getUUID()).orElse(null);
-		if (attackerMember == null || attackerMember.role() != Role.IMPOSTOR || !rules.bool("impostor_pvp_gate")
-			|| state.mayAttack(attacker.getUUID())) {
-			recentHits.put(attacker.getUUID() + ">" + target.getUUID(), server.getTickCount());
-			return true;
-		}
-		Integer hitBack = recentHits.get(target.getUUID() + ">" + attacker.getUUID());
-		if (rules.bool("impostor_self_defense") && hitBack != null && server.getTickCount() - hitBack <= 200) {
-			return true;
-		}
-		if (server.getTickCount() - lastGateWarning >= 40) {
-			lastGateWarning = server.getTickCount();
-			attacker.sendSystemMessage(Component.literal("You can't attack directly yet. Use traps, or get called out.")
-				.withStyle(ChatFormatting.RED), true);
-		}
-		return false;
 	}
 
 	// ------------------------------------------------------------------ starting a game
@@ -220,7 +128,6 @@ public final class GameController {
 			throw new IllegalStateException(e.getMessage());
 		}
 		save();
-		recentHits.clear();
 		Fx.run(server, "time set day");
 
 		if (rules.bool("apply_gamerules")) {
@@ -332,15 +239,6 @@ public final class GameController {
 		}
 	}
 
-	/** Test helper: unlocks impostor PvP right now. Returns false if it was already unlocked or no game is running. */
-	public boolean forceUnlockPvp() {
-		if (state.phase() != Phase.RUNNING || state.pvpUnlocked()) {
-			return false;
-		}
-		unlockPvp("The host unlocked it for testing.");
-		return true;
-	}
-
 	/** Hands the impostor a random trap kit and tells them what is in it (only they see the message). */
 	public void giveKit(ServerPlayer player) {
 		List<Kit.Entry> slots = Kit.roll(new Random(), rules.integer("impostor_kit_builders"),
@@ -364,7 +262,6 @@ public final class GameController {
 	public void stop() {
 		scheduler.clear();
 		state.reset();
-		recentHits.clear();
 		save();
 		Fx.run(server, "title @a clear");
 		broadcast(Component.literal("The game was cancelled.").withStyle(ChatFormatting.GRAY));
@@ -456,7 +353,7 @@ public final class GameController {
 			}
 			case EXPOSED -> {
 				save();
-				broadcast(Component.literal(targetName + " has been called out and IS an IMPOSTOR! They can attack freely now.")
+				broadcast(Component.literal(targetName + " has been called out and IS an IMPOSTOR!")
 					.withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
 				Fx.times(server, "@a", 5, 60, 20);
 				Fx.subtitle(server, "@a", Fx.text("has been exposed as an impostor", "gray", false));
