@@ -286,6 +286,22 @@ public final class GameController {
 				1.0, 1.0);
 			player.sendSystemMessage(Component.literal(impostor ? "You are an IMPOSTOR." : "You are INNOCENT.")
 				.withStyle(impostor ? ChatFormatting.RED : ChatFormatting.GREEN));
+			if (impostor && rules.bool("impostor_kit")) {
+				giveKit(player);
+			}
+		}
+	}
+
+	/** Hands the impostor a random trap kit and tells them what is in it (only they see the message). */
+	private void giveKit(ServerPlayer player) {
+		List<Kit.Entry> slots = Kit.roll(new Random(), rules.integer("impostor_kit_builders"),
+			rules.integer("impostor_kit_set_chance"));
+		player.sendSystemMessage(Component.literal("Your trap kit:").withStyle(ChatFormatting.GOLD));
+		for (Kit.Entry slot : slots) {
+			for (Kit.Item item : slot.items()) {
+				Fx.run(server, "give " + player.getGameProfile().name() + " " + item.id() + " " + item.count());
+			}
+			player.sendSystemMessage(Component.literal(" - " + slot.name()).withStyle(ChatFormatting.GOLD));
 		}
 	}
 

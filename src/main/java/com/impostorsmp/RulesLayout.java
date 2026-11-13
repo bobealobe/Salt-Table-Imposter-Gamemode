@@ -17,7 +17,8 @@ final class RulesLayout {
 		{"Chat & messages", "chat", "dead_chat", "unlock_chat_after_game", "hide_death_messages", "hide_advancements", "hide_join_leave"},
 		{"Deaths & combat", "death_sound", "block_totems", "spectate_on_death", "anti_rdm", "anti_rdm_seconds", "anti_rdm_level",
 			"anti_rdm_weakness", "anti_rdm_glowing", "anti_rdm_escalate"},
-		{"Impostor PvP", "impostor_pvp_gate", "impostor_pvp_minutes", "impostor_pvp_on_nether", "impostor_self_defense"},
+		{"Impostor PvP", "impostor_pvp_gate", "impostor_pvp_minutes", "impostor_pvp_on_nether", "impostor_self_defense",
+			"impostor_kit", "impostor_kit_builders", "impostor_kit_set_chance"},
 		{"Call-outs", "accuse", "accuse_votes", "false_accuse_punish", "false_accuse_seconds"},
 		{"The game", "impostors", "dragon_wins", "parity_win", "apply_gamerules"},
 		{"Spawning", "spread_on_start", "spread_radius", "spread_min_distance", "spread_group_size", "spread_split_impostors"}
