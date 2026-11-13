@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
@@ -22,6 +23,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
@@ -42,6 +44,7 @@ public final class GameController {
 	/** "attacker>victim" to the server tick of the last hit, used for the self-defence exception. */
 	private final Map<String, Integer> recentHits = new HashMap<>();
 	private int lastGateWarning = -100;
+	private final Course course = new Course();
 
 	GameController(MinecraftServer server, Path configDir) {
 		this.server = server;
@@ -84,8 +87,12 @@ public final class GameController {
 		if (rules.bool("block_totems")) {
 			stripTotems();
 		}
-		if (server.getTickCount() % 20 == 0 && rules.lobbyY() >= 0) {
-			purgeLobbyMobs();
+		int lobby = rules.lobbyY();
+		if (lobby >= 0) {
+			if (server.getTickCount() % 20 == 0) {
+				purgeLobbyMobs();
+			}
+			tickCourse(lobby);
 		}
 		if (state.phase() == Phase.RUNNING) {
 			state.addTicks(1);
@@ -233,13 +240,8 @@ public final class GameController {
 			Fx.run(server, "gamemode survival @a[gamemode=adventure]");
 			Fx.run(server, "effect clear @a minecraft:resistance");
 			Fx.run(server, "effect clear @a minecraft:saturation");
-			if (anyoneInLobby(lobbyY)) {
-				// The spread did not work for somebody. Keep the floor so nobody falls, and say so.
-				broadcast(Component.literal("Could not spread everybody out, so the lobby was kept. Fix the spread rules, then /imp lobby remove.")
-					.withStyle(ChatFormatting.RED));
-			} else {
-				removeLobby(lobbyY);
-			}
+			// Wait a moment for the teleports to finish, then take the lobby down (see finishLobbyRemoval).
+			scheduler.after(20, () -> finishLobbyRemoval(lobbyY, 0));
 		}
 
 		Fx.run(server, "title @a clear");
@@ -566,11 +568,11 @@ public final class GameController {
 		if (state.phase() == Phase.COUNTDOWN || state.phase() == Phase.RUNNING) {
 			throw new IllegalStateException("A game is running. Use /imp stop first.");
 		}
-		int oldY = rules.lobbyY();
-		if (oldY >= 0) {
-			removeLobby(oldY); // rebuilding: take the old one down first
-		}
 		int y = rules.integer("lobby_y");
+		int oldY = rules.lobbyY();
+		if (oldY >= 0 && oldY != y) {
+			removeLobby(oldY); // the height changed: take the old one down first
+		}
 		Fx.run(server, "forceload add " + LobbyPlan.FORCELOAD_AREA);
 		broadcast(Component.literal("Building the lobby...").withStyle(ChatFormatting.GRAY));
 		waitForLobbyChunks(y, 0);
@@ -615,13 +617,82 @@ public final class GameController {
 		Fx.run(server, "effect give " + name + " minecraft:saturation infinite 0 true");
 	}
 
-	/** Deletes the lobby (blocks, texts, button) and stops keeping its chunks loaded. */
-	private void removeLobby(int y) {
+	/**
+	 * Deletes the lobby (blocks, texts, button) and stops keeping its chunks loaded. Returns null if it worked,
+	 * otherwise the reason it did not. The lobby is only forgotten once it is really gone.
+	 */
+	private String removeLobby(int y) {
+		String error = null;
 		for (String command : LobbyPlan.remove(y)) {
-			Fx.run(server, command);
+			String e = Fx.runChecked(server, command);
+			boolean harmless = e != null && (e.contains("No blocks") || e.contains("Could not set") || e.contains("No entity"));
+			if (e != null && !harmless && error == null) {
+				error = e;
+			}
+		}
+		ServerLevel level = server.overworld();
+		BlockPos[] samples = {new BlockPos(0, y - 1, 0), new BlockPos(0, y + 9, 3), new BlockPos(0, y - 1, 30),
+			new BlockPos(0, y + 1, -13)};
+		for (BlockPos pos : samples) {
+			if (!level.getBlockState(pos).isAir()) {
+				return error != null ? error : "blocks are still there at " + pos.toShortString();
+			}
 		}
 		Fx.run(server, "forceload remove " + LobbyPlan.FORCELOAD_AREA);
+		course.clear();
 		rules.setLobbyY(-1);
+		return null;
+	}
+
+	/** Waits until nobody is up in the lobby, then removes it, and says so if that did not work. */
+	private void finishLobbyRemoval(int y, int attempt) {
+		if (rules.lobbyY() < 0) {
+			return; // already gone
+		}
+		if (anyoneInLobby(y)) {
+			if (attempt < 5) {
+				scheduler.after(20, () -> finishLobbyRemoval(y, attempt + 1));
+				return;
+			}
+			broadcast(Component.literal("Somebody is still in the lobby, so it was kept. Use /imp lobby remove once everybody is out.")
+				.withStyle(ChatFormatting.RED));
+			return;
+		}
+		String error = removeLobby(y);
+		if (error != null) {
+			broadcast(Component.literal("The lobby could not be removed: " + error + ". Try /imp lobby remove.")
+				.withStyle(ChatFormatting.RED));
+		}
+	}
+
+	// ------------------------------------------------------------------ the obstacle course timer
+
+	private void tickCourse(int lobbyY) {
+		int tick = server.getTickCount();
+		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+			if (p.isSpectator()) {
+				continue;
+			}
+			UUID id = p.getUUID();
+			String name = p.getGameProfile().name();
+			Course.Event event = course.update(id, p.getX(), p.getY(), p.getZ(), p.onGround(), tick, lobbyY);
+			switch (event.kind()) {
+				case STARTED -> p.sendSystemMessage(Component.literal("Timer started!").withStyle(ChatFormatting.GREEN), true);
+				case CANCELLED -> p.sendSystemMessage(Component.literal("You fell. Timer reset.").withStyle(ChatFormatting.GRAY), true);
+				case FINISHED -> {
+					broadcast(Component.literal(name + " completed the obstacle course in "
+						+ String.format(Locale.ROOT, "%.1f", event.seconds()) + " seconds!")
+						.withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+					Fx.sound(server, name, "minecraft:ui.toast.challenge_complete", 1.0, 1.0);
+				}
+				default -> {
+					if (tick % 4 == 0 && course.running(id)) {
+						p.sendSystemMessage(Component.literal("Course time: "
+							+ String.format(Locale.ROOT, "%.1f", course.elapsed(id, tick)) + " s").withStyle(ChatFormatting.YELLOW), true);
+					}
+				}
+			}
+		}
 	}
 
 	/** True if a living player is still up in the lobby area. */
@@ -652,11 +723,16 @@ public final class GameController {
 		Fx.run(server, "effect clear @a minecraft:resistance");
 		Fx.run(server, "effect clear @a minecraft:saturation");
 		Fx.run(server, "spreadplayers 100 100 0 40 false @a[gamemode=!spectator]");
-		if (anyoneInLobby(y)) {
-			throw new IllegalStateException("Could not move everybody out, so the lobby was kept.");
-		}
-		removeLobby(y);
-		broadcast(Component.literal("The lobby was removed.").withStyle(ChatFormatting.GRAY));
+		broadcast(Component.literal("Removing the lobby...").withStyle(ChatFormatting.GRAY));
+		scheduler.after(20, () -> {
+			if (rules.lobbyY() < 0) {
+				rules.setLobbyY(y); // the mod had lost track of it: remove by the lobby_y rule
+			}
+			finishLobbyRemoval(y, 0);
+			if (rules.lobbyY() < 0) {
+				broadcast(Component.literal("The lobby was removed.").withStyle(ChatFormatting.GRAY));
+			}
+		});
 	}
 
 	// ------------------------------------------------------------------ chat

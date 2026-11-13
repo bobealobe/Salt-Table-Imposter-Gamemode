@@ -1,5 +1,7 @@
 package com.impostorsmp;
 
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+
 import net.minecraft.server.MinecraftServer;
 
 /**
@@ -16,6 +18,18 @@ final class Fx {
 			server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command);
 		} catch (RuntimeException e) {
 			ImpostorLog.warn("Command failed: " + command + " (" + e + ")");
+		}
+	}
+
+	/** Runs one command and returns null if it worked, otherwise the reason it failed (so it can be shown). */
+	static String runChecked(MinecraftServer server, String command) {
+		try {
+			server.getCommands().getDispatcher().execute(command, server.createCommandSourceStack());
+			return null;
+		} catch (CommandSyntaxException e) {
+			return e.getMessage();
+		} catch (RuntimeException e) {
+			return e.toString();
 		}
 	}
 

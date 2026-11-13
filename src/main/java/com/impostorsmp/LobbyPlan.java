@@ -101,8 +101,7 @@ final class LobbyPlan {
 
 	/** Commands that build the whole lobby for the current rules. Chunks must be loaded first. */
 	static List<String> build(int y, Rules rules) {
-		List<String> c = new ArrayList<>();
-		c.add("kill @e[type=minecraft:text_display,tag=" + TAG + "]");
+		List<String> c = new ArrayList<>(remove(y)); // start from nothing, so leftovers of older lobbies are gone too
 
 		// Shells. The room is closed so nobody can fall out (the world is hardcore).
 		c.add(fill(-12, y - 1, -12, 12, y + 9, 12, "minecraft:black_concrete hollow"));
@@ -208,39 +207,59 @@ final class LobbyPlan {
 
 	// ------------------------------------------------------------------ obstacle course
 
+	/** One platform of the course: a rectangle of blocks at height y+dy. */
+	record Node(int x1, int z1, int x2, int z2, int dy, String block) {
+	}
+
+	private static Node stone(int x, int z, int dy, String block) {
+		return new Node(x, z, x, z, dy, block);
+	}
+
+	/**
+	 * The course in order, start to finish. It winds across the hall: stepping stones, ice, a row of stones to
+	 * the east, then climbing pillars back west to the gold finish platform. Every jump is one block or two
+	 * of air and at most one block up.
+	 */
+	static final List<Node> COURSE = List.of(
+		new Node(Course.START_X1, Course.START_Z1, Course.START_X2, Course.START_Z2, Course.START_DY, "minecraft:lime_concrete"),
+		stone(0, 21, 3, "minecraft:cyan_concrete"),
+		stone(-1, 23, 3, "minecraft:cyan_concrete"),
+		stone(1, 25, 3, "minecraft:cyan_concrete"),
+		stone(-1, 27, 3, "minecraft:cyan_concrete"),
+		stone(1, 29, 3, "minecraft:cyan_concrete"),
+		stone(0, 31, 3, "minecraft:cyan_concrete"),
+		new Node(-1, 33, 1, 35, 3, "minecraft:packed_ice"),
+		stone(3, 36, 3, "minecraft:white_concrete"),
+		stone(5, 37, 3, "minecraft:white_concrete"),
+		stone(7, 36, 3, "minecraft:white_concrete"),
+		stone(9, 37, 3, "minecraft:white_concrete"),
+		stone(9, 39, 4, "minecraft:orange_concrete"),
+		stone(7, 40, 5, "minecraft:orange_concrete"),
+		stone(5, 39, 6, "minecraft:orange_concrete"),
+		stone(3, 40, 6, "minecraft:orange_concrete"),
+		stone(1, 41, 6, "minecraft:orange_concrete"),
+		new Node(Course.FINISH_X1, Course.FINISH_Z1, Course.FINISH_X2, Course.FINISH_Z2, Course.FINISH_DY, "minecraft:gold_block"));
+
 	/**
 	 * A parkour hall that opens straight off the room's south wall. It is closed and has a floor, and everybody in
-	 * the lobby has Resistance, so falling off only means walking back to the start. The course layer is y+3
-	 * (you stand on y+4); nothing above it for 8 blocks.
+	 * the lobby has Resistance, so falling off only means walking back to the start. Nothing hangs over the course:
+	 * the highest platform is at y+6 and the ceiling is at y+13.
 	 */
 	private static List<String> obstacleCourse(int y) {
 		List<String> c = new ArrayList<>();
-		int level = y + 3;
 
 		// Stairs up to the start platform.
 		for (int k = 0; k < 4; k++) {
 			c.add(fill(-1, y, 14 + k, 1, y + k, 14 + k, "minecraft:blue_concrete"));
 		}
-		c.add(fill(-2, level, 17, 2, level, 19, "minecraft:lime_concrete"));
-
-		// 1. Stepping stones.
-		int[][] stones = {{0, 21}, {-1, 23}, {1, 25}, {-1, 27}, {1, 29}, {0, 31}};
-		for (int[] s : stones) {
-			c.add(set(s[0], level, s[1], "minecraft:cyan_concrete"));
+		for (Node n : COURSE) {
+			c.add(fill(n.x1(), y + n.dy(), n.z1(), n.x2(), y + n.dy(), n.z2(), n.block()));
 		}
-		// 2. Slippery ice.
-		c.add(fill(-1, level, 33, 1, level, 37, "minecraft:packed_ice"));
-		// 3. Climbing pillars.
-		c.add(set(0, level + 1, 39, "minecraft:orange_concrete"));
-		c.add(set(-1, level + 2, 41, "minecraft:orange_concrete"));
-		c.add(set(1, level + 3, 43, "minecraft:orange_concrete"));
-		// The finish.
-		c.add(fill(-2, level + 3, 45, 2, level + 3, 48, "minecraft:gold_block"));
 
 		c.add(display(0, y + 6.2, 18, 1.5, "center", 200,
 			new Text().add("OBSTACLE COURSE", "gold", true).nl()
-				.add("Falling is safe. Just walk back to the start.", "gray")));
-		c.add(display(0, y + 9.5, 47, 2, "center", 200,
+				.add("Jump off to start the timer. Falling is safe.", "gray")));
+		c.add(display(0, y + 9.5, 46, 2, "center", 200,
 			new Text().add("YOU MADE IT!", "green", true)));
 		return c;
 	}
@@ -375,9 +394,9 @@ final class LobbyPlan {
 				}
 				t.add(def.name(), "white");
 			}
+			// One straight row along the north wall of the corridor, in order.
 			double x = -15.5 - 3.4 * i;
-			double z = i % 2 == 0 ? -1.25 : 1.25;
-			c.add(display(x, y + 2.0, z, 0.6, "left", 170, t));
+			c.add(display(x, y + 2.0, -0.7, 0.6, "left", 170, t));
 		}
 		return c;
 	}
