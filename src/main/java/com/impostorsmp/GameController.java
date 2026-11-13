@@ -239,17 +239,36 @@ public final class GameController {
 		}
 	}
 
-	/** Hands the impostor a random trap kit and tells them what is in it (only they see the message). */
+	/**
+	 * Hands the impostor a random trap kit and tells them what is in it (only they see the message).
+	 * The items go into empty slots of the main inventory, never the hotbar, so nothing is held in their hand
+	 * where a spawn partner could see it, and they are placed silently (the give command plays a pickup sound
+	 * that nearby players can hear).
+	 */
 	public void giveKit(ServerPlayer player) {
+		String name = player.getGameProfile().name();
+		Inventory inventory = player.getInventory();
+		List<Integer> free = new ArrayList<>();
+		for (int slot = 9; slot < 36; slot++) { // 9..35 is the main inventory, 0..8 the hotbar
+			if (inventory.getItem(slot).isEmpty()) {
+				free.add(slot);
+			}
+		}
 		List<Kit.Entry> slots = Kit.roll(new Random(), rules.integer("impostor_kit_builders"),
 			rules.integer("impostor_kit_set_chance"));
-		player.sendSystemMessage(Component.literal("Your trap kit:").withStyle(ChatFormatting.GOLD));
+		player.sendSystemMessage(Component.literal("Your trap kit (in your inventory, not your hotbar):").withStyle(ChatFormatting.GOLD));
 		for (Kit.Entry slot : slots) {
 			for (Kit.Item item : slot.items()) {
-				Fx.run(server, "give " + player.getGameProfile().name() + " " + item.id() + " " + item.count());
+				if (free.isEmpty()) {
+					Fx.run(server, "give " + name + " " + item.id() + " " + item.count()); // inventory full: fall back
+				} else {
+					int index = free.remove(0) - 9;
+					Fx.run(server, "item replace entity " + name + " inventory." + index + " with " + item.id() + " " + item.count());
+				}
 			}
 			player.sendSystemMessage(Component.literal(" - " + slot.name()).withStyle(ChatFormatting.GOLD));
 		}
+		player.sendSystemMessage(Component.literal("Keep it out of your hands while others are watching.").withStyle(ChatFormatting.GRAY));
 	}
 
 	private void beginRunning() {
