@@ -57,6 +57,9 @@ final class ImpostorCommands {
 				.then(Commands.literal("innocent").executes(ctx -> startTest(ctx.getSource(), Role.INNOCENT)))
 				.then(Commands.literal("unlock").executes(ctx -> testUnlock(ctx.getSource())))
 				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource()))));
+			root.then(admin("lobby")
+				.executes(ctx -> lobby(ctx.getSource()))
+				.then(Commands.literal("remove").executes(ctx -> lobbyRemove(ctx.getSource()))));
 			root.then(admin("stop").executes(ctx -> stop(ctx.getSource())));
 			root.then(admin("status").executes(ctx -> status(ctx.getSource())));
 			root.then(admin("reveal").executes(ctx -> reveal(ctx.getSource())));
@@ -129,6 +132,7 @@ final class ImpostorCommands {
 		say(src, "/imp role - see your own role");
 		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
 		say(src, "Solo test (host): /imp test impostor | innocent | unlock | kit");
+		say(src, "Lobby (host): /imp lobby builds a sky lobby with a start button, /imp lobby remove takes it down");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
 	}
@@ -186,6 +190,10 @@ final class ImpostorCommands {
 			game.start();
 		} catch (IllegalStateException e) {
 			src.sendFailure(Component.literal(e.getMessage()));
+			if (src.getPlayer() == null) {
+				// Pressed from the lobby button: there is no player to read the failure, so tell everybody.
+				game.broadcast(Component.literal(e.getMessage()).withStyle(net.minecraft.ChatFormatting.RED));
+			}
 			return 0;
 		}
 		say(src, "Starting. Roles are revealed after the countdown.");
@@ -236,6 +244,34 @@ final class ImpostorCommands {
 			return 0;
 		}
 		game.giveKit(player);
+		return 1;
+	}
+
+	private static int lobby(CommandSourceStack src) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		try {
+			game.createLobby();
+		} catch (IllegalStateException e) {
+			src.sendFailure(Component.literal(e.getMessage()));
+			return 0;
+		}
+		return 1;
+	}
+
+	private static int lobbyRemove(CommandSourceStack src) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		try {
+			game.removeLobbyNow();
+		} catch (IllegalStateException e) {
+			src.sendFailure(Component.literal(e.getMessage()));
+			return 0;
+		}
 		return 1;
 	}
 

@@ -57,6 +57,7 @@ public final class Rules {
 		bool("spread_on_start", false, "/imp start first spreads everybody out randomly with /spreadplayers."),
 		integer("spread_radius", 2500, 100, 29999999, "Spread area is a square this many blocks from 0,0 in every direction."),
 		integer("spread_min_distance", 500, 0, 100000, "Minimum distance between players after spreading."),
+		integer("lobby_y", 250, 64, 300, "Height of the sky lobby made by /imp lobby."),
 		integer("spread_group_size", 1, 1, 6, "Players spawn in groups of this size (1 = everybody alone, 2 = pairs). Teammates land on the same spot."),
 		bool("spread_split_impostors", true, "Never put two impostors in the same spawn group, so they don't find each other at the start.")
 	);
@@ -154,6 +155,22 @@ public final class Rules {
 			}
 		}
 		return out;
+	}
+
+	// ---- lobby ----
+
+	/** Height of the lobby that currently exists, or -1 if there is none. */
+	public int lobbyY() {
+		try {
+			return Integer.parseInt(props.getProperty("lobby.y", "-1").trim());
+		} catch (NumberFormatException e) {
+			return -1;
+		}
+	}
+
+	public void setLobbyY(int y) {
+		props.setProperty("lobby.y", Integer.toString(y));
+		save();
 	}
 
 	public void setAdmins(Set<String> names) {

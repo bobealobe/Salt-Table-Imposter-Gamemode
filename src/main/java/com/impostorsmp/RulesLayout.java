@@ -21,7 +21,7 @@ final class RulesLayout {
 			"impostor_kit", "impostor_kit_builders", "impostor_kit_set_chance"},
 		{"Call-outs", "accuse", "accuse_votes", "false_accuse_punish", "false_accuse_seconds"},
 		{"The game", "impostors", "dragon_wins", "parity_win", "apply_gamerules"},
-		{"Spawning", "spread_on_start", "spread_radius", "spread_min_distance", "spread_group_size", "spread_split_impostors"}
+		{"Spawning", "lobby_y", "spread_on_start", "spread_radius", "spread_min_distance", "spread_group_size", "spread_split_impostors"}
 	};
 
 	private RulesLayout() {

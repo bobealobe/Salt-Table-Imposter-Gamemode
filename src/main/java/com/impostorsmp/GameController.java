@@ -19,6 +19,7 @@ import com.impostorsmp.GameState.AccuseResult;
 import com.impostorsmp.GameState.Role;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -215,10 +216,25 @@ public final class GameController {
 			applyGameRules();
 		}
 
+		// Players waiting in the sky lobby must be moved down to the world, so they are always spread out.
+		int lobbyY = rules.lobbyY();
+		boolean fromLobby = lobbyY >= 0;
+
 		long delay = 0;
-		if (testHost == null && rules.bool("spread_on_start")) {
+		if (fromLobby || (testHost == null && rules.bool("spread_on_start"))) {
 			spreadPlayers(players);
 			delay = 60; // give the world a moment to load around everybody
+		}
+		if (fromLobby) {
+			Fx.run(server, "gamemode survival @a[gamemode=adventure]");
+			Fx.run(server, "effect clear @a minecraft:resistance");
+			if (anyoneInLobby(lobbyY)) {
+				// The spread did not work for somebody. Keep the floor so nobody falls, and say so.
+				broadcast(Component.literal("Could not spread everybody out, so the lobby was kept. Fix the spread rules, then /imp lobby remove.")
+					.withStyle(ChatFormatting.RED));
+			} else {
+				removeLobby(lobbyY);
+			}
 		}
 
 		Fx.run(server, "title @a clear");
@@ -512,6 +528,12 @@ public final class GameController {
 
 	/** Called when somebody joins or respawns: dead players (and late joiners during a game) become spectators. */
 	void onPlayerReady(ServerPlayer player) {
+		int lobbyY = rules.lobbyY();
+		if (lobbyY >= 0 && state.phase() != Phase.RUNNING && state.phase() != Phase.COUNTDOWN) {
+			// Somebody joining (or respawning) while the lobby is up goes straight into it.
+			sendToLobby(player.getGameProfile().name(), lobbyY);
+			return;
+		}
 		if (!rules.bool("spectate_on_death")) {
 			return;
 		}
@@ -528,6 +550,97 @@ public final class GameController {
 			player.sendSystemMessage(Component.literal("A game is in progress, so you are spectating.")
 				.withStyle(ChatFormatting.GRAY));
 		}
+	}
+
+	// ------------------------------------------------------------------ the sky lobby
+
+	private static final int[][] LOBBY_CORNERS = {{-12, -12}, {12, -12}, {-12, 38}, {12, 38}};
+
+	/** Builds the lobby (after the chunks are loaded), moves everybody into it and makes it the world spawn. */
+	public void createLobby() {
+		if (state.phase() == Phase.COUNTDOWN || state.phase() == Phase.RUNNING) {
+			throw new IllegalStateException("A game is running. Use /imp stop first.");
+		}
+		int oldY = rules.lobbyY();
+		if (oldY >= 0) {
+			removeLobby(oldY); // rebuilding: take the old one down first
+		}
+		int y = rules.integer("lobby_y");
+		Fx.run(server, "forceload add " + LobbyPlan.FORCELOAD_AREA);
+		broadcast(Component.literal("Building the lobby...").withStyle(ChatFormatting.GRAY));
+		waitForLobbyChunks(y, 0);
+	}
+
+	private void waitForLobbyChunks(int y, int attempt) {
+		boolean ready = true;
+		for (int[] corner : LOBBY_CORNERS) {
+			ready &= server.overworld().hasChunkAt(new BlockPos(corner[0], y, corner[1]));
+		}
+		if (ready) {
+			buildLobby(y);
+			return;
+		}
+		if (attempt >= 60) {
+			Fx.run(server, "forceload remove " + LobbyPlan.FORCELOAD_AREA);
+			broadcast(Component.literal("The lobby area would not load. Try /imp lobby again.").withStyle(ChatFormatting.RED));
+			return;
+		}
+		scheduler.after(10, () -> waitForLobbyChunks(y, attempt + 1));
+	}
+
+	private void buildLobby(int y) {
+		for (String command : LobbyPlan.build(y, rules)) {
+			Fx.run(server, command);
+		}
+		rules.setLobbyY(y);
+		Fx.run(server, "setworldspawn 0 " + y + " 0");
+		Fx.run(server, "gamerule spawn_radius 0");
+		Fx.run(server, "gamemode adventure @a");
+		Fx.run(server, "execute in minecraft:overworld run tp @a 0.5 " + y + " 0.5");
+		Fx.run(server, "effect give @a minecraft:resistance infinite 4 true");
+		broadcast(Component.literal("The lobby is ready. Press the green button when everybody is here.")
+			.withStyle(ChatFormatting.GREEN));
+	}
+
+	private void sendToLobby(String name, int y) {
+		Fx.run(server, "gamemode adventure " + name);
+		Fx.run(server, "execute in minecraft:overworld run tp " + name + " 0.5 " + y + " 0.5");
+		Fx.run(server, "effect give " + name + " minecraft:resistance infinite 4 true");
+	}
+
+	/** Deletes the lobby (blocks, texts, button) and stops keeping its chunks loaded. */
+	private void removeLobby(int y) {
+		for (String command : LobbyPlan.remove(y)) {
+			Fx.run(server, command);
+		}
+		Fx.run(server, "forceload remove " + LobbyPlan.FORCELOAD_AREA);
+		rules.setLobbyY(-1);
+	}
+
+	/** True if a living player is still up in the lobby area. */
+	private boolean anyoneInLobby(int y) {
+		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+			if (!p.isSpectator() && p.getY() > y - 3 && Math.abs(p.getX()) < 40 && p.getZ() > -20 && p.getZ() < 45) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Takes the lobby down without starting a game: everybody goes to survival and lands near 0,0. */
+	public void removeLobbyNow() {
+		int y = rules.lobbyY();
+		if (y < 0) {
+			throw new IllegalStateException("There is no lobby.");
+		}
+		Fx.run(server, "gamemode survival @a[gamemode=adventure]");
+		Fx.run(server, "effect clear @a minecraft:resistance");
+		Fx.run(server, "spreadplayers 0 0 0 30 false @a[gamemode=!spectator]");
+		if (anyoneInLobby(y)) {
+			throw new IllegalStateException("Could not move everybody out, so the lobby was kept.");
+		}
+		removeLobby(y);
+		broadcast(Component.literal("The lobby was removed.").withStyle(ChatFormatting.GRAY));
 	}
 
 	// ------------------------------------------------------------------ chat
