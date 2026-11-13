@@ -52,6 +52,11 @@ final class ImpostorCommands {
 				.then(Commands.argument("player", EntityArgument.player())
 					.executes(ctx -> accuse(ctx.getSource(), EntityArgument.getPlayer(ctx, "player")))));
 			root.then(admin("start").executes(ctx -> start(ctx.getSource())));
+			root.then(admin("test")
+				.then(Commands.literal("impostor").executes(ctx -> startTest(ctx.getSource(), Role.IMPOSTOR)))
+				.then(Commands.literal("innocent").executes(ctx -> startTest(ctx.getSource(), Role.INNOCENT)))
+				.then(Commands.literal("unlock").executes(ctx -> testUnlock(ctx.getSource())))
+				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource()))));
 			root.then(admin("stop").executes(ctx -> stop(ctx.getSource())));
 			root.then(admin("status").executes(ctx -> status(ctx.getSource())));
 			root.then(admin("reveal").executes(ctx -> reveal(ctx.getSource())));
@@ -123,6 +128,7 @@ final class ImpostorCommands {
 	private static int help(CommandSourceStack src) {
 		say(src, "/imp role - see your own role");
 		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
+		say(src, "Solo test (host): /imp test impostor | innocent | unlock | kit");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
 	}
@@ -183,6 +189,53 @@ final class ImpostorCommands {
 			return 0;
 		}
 		say(src, "Starting. Roles are revealed after the countdown.");
+		return 1;
+	}
+
+	private static int startTest(CommandSourceStack src, Role role) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		ServerPlayer player = src.getPlayer();
+		if (player == null) {
+			src.sendFailure(Component.literal("Run this as a player."));
+			return 0;
+		}
+		try {
+			game.startTest(player, role);
+		} catch (IllegalStateException e) {
+			src.sendFailure(Component.literal(e.getMessage()));
+			return 0;
+		}
+		say(src, "Test game: you are " + (role == Role.IMPOSTOR ? "an IMPOSTOR" : "INNOCENT")
+			+ ", the other 5 players are stand-ins. /imp stop ends it.");
+		return 1;
+	}
+
+	private static int testUnlock(CommandSourceStack src) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		if (!game.forceUnlockPvp()) {
+			src.sendFailure(Component.literal("Needs a running game with impostor PvP still locked."));
+			return 0;
+		}
+		return 1;
+	}
+
+	private static int testKit(CommandSourceStack src) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		ServerPlayer player = src.getPlayer();
+		if (player == null) {
+			src.sendFailure(Component.literal("Run this as a player."));
+			return 0;
+		}
+		game.giveKit(player);
 		return 1;
 	}
 

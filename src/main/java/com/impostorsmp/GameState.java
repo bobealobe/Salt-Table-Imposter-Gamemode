@@ -152,6 +152,37 @@ public final class GameState {
 		worldSeed = seed;
 	}
 
+	/**
+	 * Solo test game: the host plays {@code hostRole} and the rest of the six are stand-ins that don't exist
+	 * in the world (they never move or die), so one person can try everything alone.
+	 */
+	public void beginTest(UUID hostId, String hostName, Role hostRole, int impostorCount, int total, long seed) {
+		if (impostorCount < 1 || total <= impostorCount) {
+			throw new IllegalArgumentException("A test game needs at least one impostor and more players than impostors.");
+		}
+		int impostorsLeft = impostorCount - (hostRole == Role.IMPOSTOR ? 1 : 0);
+		int innocentsLeft = total - impostorCount - (hostRole == Role.INNOCENT ? 1 : 0);
+		if (impostorsLeft < 0 || innocentsLeft < 0) {
+			throw new IllegalArgumentException("Those numbers don't leave room for your role.");
+		}
+		members.clear();
+		clearExtras();
+		members.put(hostId, new Member(hostId, hostName, hostRole));
+		for (int i = 1; i <= total - 1; i++) {
+			UUID id = UUID.nameUUIDFromBytes(("impostorsmp-test-dummy-" + i).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			Role role = impostorsLeft > 0 ? Role.IMPOSTOR : Role.INNOCENT;
+			if (role == Role.IMPOSTOR) {
+				impostorsLeft--;
+			} else {
+				innocentsLeft--;
+			}
+			members.put(id, new Member(id, "Dummy " + i, role));
+		}
+		phase = Phase.COUNTDOWN;
+		outcome = Outcome.NONE;
+		worldSeed = seed;
+	}
+
 	public void startRunning() {
 		if (phase == Phase.COUNTDOWN) {
 			phase = Phase.RUNNING;

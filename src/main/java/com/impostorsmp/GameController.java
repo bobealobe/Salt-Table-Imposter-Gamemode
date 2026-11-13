@@ -175,6 +175,18 @@ public final class GameController {
 
 	/** Picks the roles and starts the countdown. Throws IllegalStateException with a readable message if it can't. */
 	public void start() {
+		start(null, null);
+	}
+
+	/**
+	 * Solo test: the host gets the chosen role and the other five players are stand-ins. No spreading, and
+	 * the dummies never die, so the game only ends if you make it end.
+	 */
+	public void startTest(ServerPlayer host, Role role) {
+		start(host, role);
+	}
+
+	private void start(ServerPlayer testHost, Role testRole) {
 		if (state.phase() == Phase.COUNTDOWN || state.phase() == Phase.RUNNING) {
 			throw new IllegalStateException("A game is already running. Use /imp stop first.");
 		}
@@ -187,7 +199,12 @@ public final class GameController {
 		}
 		int impostors = rules.integer("impostors");
 		try {
-			state.begin(players, impostors, new Random(), server.overworld().getSeed());
+			if (testHost != null) {
+				state.beginTest(testHost.getUUID(), testHost.getGameProfile().name(), testRole, impostors, 6,
+					server.overworld().getSeed());
+			} else {
+				state.begin(players, impostors, new Random(), server.overworld().getSeed());
+			}
 		} catch (IllegalArgumentException e) {
 			throw new IllegalStateException(e.getMessage());
 		}
@@ -199,7 +216,7 @@ public final class GameController {
 		}
 
 		long delay = 0;
-		if (rules.bool("spread_on_start")) {
+		if (testHost == null && rules.bool("spread_on_start")) {
 			spreadPlayers(players);
 			delay = 60; // give the world a moment to load around everybody
 		}
@@ -292,8 +309,17 @@ public final class GameController {
 		}
 	}
 
+	/** Test helper: unlocks impostor PvP right now. Returns false if it was already unlocked or no game is running. */
+	public boolean forceUnlockPvp() {
+		if (state.phase() != Phase.RUNNING || state.pvpUnlocked()) {
+			return false;
+		}
+		unlockPvp("The host unlocked it for testing.");
+		return true;
+	}
+
 	/** Hands the impostor a random trap kit and tells them what is in it (only they see the message). */
-	private void giveKit(ServerPlayer player) {
+	public void giveKit(ServerPlayer player) {
 		List<Kit.Entry> slots = Kit.roll(new Random(), rules.integer("impostor_kit_builders"),
 			rules.integer("impostor_kit_set_chance"));
 		player.sendSystemMessage(Component.literal("Your trap kit:").withStyle(ChatFormatting.GOLD));
