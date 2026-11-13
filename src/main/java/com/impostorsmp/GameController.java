@@ -257,16 +257,32 @@ public final class GameController {
 		List<Kit.Entry> slots = Kit.roll(new Random(), rules.integer("impostor_kit_builders"),
 			rules.integer("impostor_kit_set_chance"));
 		player.sendSystemMessage(Component.literal("Your trap kit (in your inventory, not your hotbar):").withStyle(ChatFormatting.GOLD));
-		for (Kit.Entry slot : slots) {
+		for (int n = 0; n < slots.size(); n++) {
+			Kit.Entry slot = slots.get(n);
 			for (Kit.Item item : slot.items()) {
-				if (free.isEmpty()) {
-					Fx.run(server, "give " + name + " " + item.id() + " " + item.count()); // inventory full: fall back
-				} else {
-					int index = free.remove(0) - 9;
-					Fx.run(server, "item replace entity " + name + " inventory." + index + " with " + item.id() + " " + item.count());
+				for (int count : item.stacks()) { // one command per legal stack: a stack bigger than the item allows is refused
+					boolean placed = false;
+					if (!free.isEmpty()) {
+						int index = free.get(0) - 9;
+						String error = Fx.runChecked(server, "item replace entity " + name + " inventory." + index + " with " + item.id() + " " + count);
+						if (error == null) {
+							free.remove(0);
+							placed = true;
+						} else {
+							ImpostorLog.warn("Kit item " + item.id() + " x" + count + " could not be placed silently: " + error);
+						}
+					}
+					if (!placed) {
+						// The inventory is full, or the quiet way failed: give it normally so the item is never lost.
+						String error = Fx.runChecked(server, "give " + name + " " + item.id() + " " + count);
+						if (error != null) {
+							ImpostorLog.warn("Kit item " + item.id() + " x" + count + " could not be given: " + error);
+						}
+					}
 				}
 			}
-			player.sendSystemMessage(Component.literal(" - " + slot.name()).withStyle(ChatFormatting.GOLD));
+			String label = n == 0 ? "Quick trap" : "Trap slot " + n;
+			player.sendSystemMessage(Component.literal(" - " + label + ": " + slot.name()).withStyle(ChatFormatting.GOLD));
 		}
 		player.sendSystemMessage(Component.literal("Keep it out of your hands while others are watching.").withStyle(ChatFormatting.GRAY));
 	}

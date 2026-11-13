@@ -53,15 +53,15 @@ final class Kit {
 		one("sticky_piston", 12, "Sticky piston x12", 3),
 		one("observer", 12, "Observer x12", 3),
 		one("redstone", 32, "Redstone dust x32", 2),
-		one("repeater", 4, "Repeater x4", 1),
+		one("repeater", 6, "Repeater x6", 1),
 		one("tnt", 6, "TNT x6", 2),
 		one("tnt_minecart", 3, "TNT minecart x3", 2),
-		one("slime_block", 4, "Slime block x4", 1));
+		one("slime_block", 6, "Slime block x6", 1));
 
 	/** Ready-made sets. Each one has enough in it to build a trap of that kind. */
 	static final List<Entry> BUNDLES = List.of(
-		new Entry("Piston trap set (8 sticky piston, 8 observer, 20 redstone dust, 4 repeater)",
-			List.of(i("sticky_piston", 8), i("observer", 8), i("redstone", 20), i("repeater", 4)), 3),
+		new Entry("Piston trap set (8 sticky piston, 8 observer, 20 redstone dust, 6 repeater)",
+			List.of(i("sticky_piston", 8), i("observer", 8), i("redstone", 20), i("repeater", 6)), 3),
 		new Entry("Pitfall set (32 scaffolding, 4 observer, 4 sticky piston)",
 			List.of(i("scaffolding", 32), i("observer", 4), i("sticky_piston", 4)), 2),
 		new Entry("TNT set (5 TNT, 4 observer, 12 redstone dust)",

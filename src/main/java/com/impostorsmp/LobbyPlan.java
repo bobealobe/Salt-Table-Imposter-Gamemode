@@ -344,13 +344,13 @@ final class LobbyPlan {
 		}
 		int builders = r.integer("impostor_kit_builders");
 
-		Text fast = new Text().add("IMPOSTOR KIT", "red", true).nl().add("1 fast trap item:", "gray");
+		Text fast = new Text().add("IMPOSTOR KIT", "red", true).nl().add("QUICK TRAP (you get 1):", "yellow", true);
 		for (Kit.Entry e : Kit.FAST) {
 			fast.nl().add("- " + e.name(), "white");
 		}
 		c.add(display(-4, y + 3.5, 1, 0.9, "left", 130, fast));
 
-		Text singles = new Text().add(builders + " building slot" + (builders == 1 ? "" : "s") + ":", "gray");
+		Text singles = new Text().add("TRAP SLOTS (you get " + builders + "):", "yellow", true);
 		for (Kit.Entry e : Kit.SINGLES) {
 			singles.nl().add("- " + e.name(), "white");
 		}

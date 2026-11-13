@@ -24,6 +24,8 @@ final class Course {
 	static final int START_DY = 3, FINISH_DY = 6;
 
 	private final Map<UUID, Integer> started = new HashMap<>();
+	/** Players who were standing on the start platform on the previous tick. */
+	private final java.util.Set<UUID> onPlatform = new java.util.HashSet<>();
 
 	boolean running(UUID id) {
 		return started.containsKey(id);
@@ -37,10 +39,12 @@ final class Course {
 
 	void clear() {
 		started.clear();
+		onPlatform.clear();
 	}
 
 	void forget(UUID id) {
 		started.remove(id);
+		onPlatform.remove(id);
 	}
 
 	private static boolean inside(double x, double z, int x1, int z1, int x2, int z2) {
@@ -54,8 +58,23 @@ final class Course {
 	Event update(UUID id, double x, double y, double z, boolean onGround, int tick, int lobbyY) {
 		boolean running = started.containsKey(id);
 		if (!running) {
+			double standing = lobbyY + START_DY + 1;
 			boolean onStart = inside(x, z, START_X1, START_Z1, START_X2, START_Z2);
-			if (onStart && !onGround && y > lobbyY + START_DY + 1.2) {
+			boolean wasOnPlatform = onPlatform.contains(id);
+			boolean standingNow = onGround && onStart && Math.abs(y - standing) < 0.2;
+			if (standingNow) {
+				onPlatform.add(id);
+			} else {
+				onPlatform.remove(id);
+			}
+			// A jump straight off the platform: standing there a tick ago, now in the air and higher up. This works
+			// even at the very edge, where the jump carries you out of the platform area within one tick.
+			boolean jumpedOff = wasOnPlatform && !onGround && y > standing + 0.05
+				&& x > START_X1 - 3 && x < START_X2 + 4 && z > START_Z1 - 3 && z < START_Z2 + 4;
+			// Or jumping in the air above the platform.
+			boolean hopping = onStart && !onGround && y > standing + 0.2;
+			if (jumpedOff || hopping) {
+				onPlatform.remove(id);
 				started.put(id, tick);
 				return new Event(Kind.STARTED, 0);
 			}
