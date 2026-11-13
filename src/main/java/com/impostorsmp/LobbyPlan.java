@@ -14,7 +14,7 @@ import java.util.Locale;
 final class LobbyPlan {
 	static final String TAG = "imp_lobby";
 	/** The area to keep loaded while the lobby exists: x1 z1 x2 z2 in blocks. */
-	static final String FORCELOAD_AREA = "-12 -12 12 38";
+	static final String FORCELOAD_AREA = "-12 -12 12 80";
 
 	private LobbyPlan() {
 	}
@@ -72,6 +72,7 @@ final class LobbyPlan {
 		c.add("kill @e[type=minecraft:text_display,tag=" + TAG + "]");
 		c.add(fill(-12, y - 1, -12, 12, y + 9, 12, "minecraft:air"));
 		c.add(fill(-8, y - 1, 12, 8, y + 7, 34, "minecraft:air"));
+		c.add(fill(-11, y - 1, 34, 11, y + 13, 72, "minecraft:air"));
 		return c;
 	}
 
@@ -105,9 +106,92 @@ final class LobbyPlan {
 		c.add("setblock 0 " + (y + 1) + " -12 minecraft:command_block{Command:\"imp start\",auto:0b,TrackOutput:0b}");
 		c.add("setblock 0 " + (y + 1) + " -11 minecraft:stone_button[face=wall,facing=south]");
 
+		c.addAll(decorations(y));
+		c.addAll(obstacleCourse(y));
+
 		c.addAll(roomTexts(y, rules));
 		c.addAll(kitTexts(y, rules));
 		c.addAll(hallwayTexts(y, rules));
+		return c;
+	}
+
+	// ------------------------------------------------------------------ decorations
+
+	private static List<String> decorations(int y) {
+		List<String> c = new ArrayList<>();
+
+		// Room: inlaid floor, gold emblem in the middle, an orange stripe round the walls, corner pillars.
+		c.add(fill(-9, y - 1, -9, 9, y - 1, 9, "minecraft:polished_blackstone outline"));
+		c.add(fill(-1, y - 1, -1, 1, y - 1, 1, "minecraft:gold_block"));
+		c.add(fill(-11, y + 6, -11, 11, y + 6, 11, "minecraft:orange_concrete outline"));
+		for (int sx : new int[] {-1, 1}) {
+			for (int sz : new int[] {-1, 1}) {
+				int x1 = sx < 0 ? -11 : 10;
+				int z1 = sz < 0 ? -11 : 10;
+				c.add(fill(x1, y, z1, x1 + 1, y + 8, z1 + 1, "minecraft:quartz_pillar"));
+			}
+		}
+		// A carpet from the start button to the middle, a red runner to the hallway, two benches.
+		c.add(fill(-1, y, -10, 1, y, -2, "minecraft:lime_carpet"));
+		c.add(fill(-1, y, 2, 1, y, 11, "minecraft:red_carpet"));
+		c.add(fill(-9, y, 9, -4, y, 9, "minecraft:quartz_slab"));
+		c.add(fill(4, y, 9, 9, y, 9, "minecraft:quartz_slab"));
+		// A skylight: only sky is visible through it, never the ground.
+		c.add(fill(-2, y + 9, -2, 2, y + 9, 2, "minecraft:glass"));
+
+		// Hallway: red runner and an orange stripe.
+		c.add(fill(-1, y, 13, 1, y, 33, "minecraft:red_carpet"));
+		c.add(fill(-7, y + 5, 13, 7, y + 5, 33, "minecraft:orange_concrete outline"));
+		return c;
+	}
+
+	// ------------------------------------------------------------------ obstacle course
+
+	/**
+	 * A parkour hall past the end of the hallway. It is closed and has a floor, and everybody in the lobby has
+	 * Resistance, so falling off only means walking back to the start. The course layer is y+3 (you stand on y+4).
+	 */
+	private static List<String> obstacleCourse(int y) {
+		List<String> c = new ArrayList<>();
+		int level = y + 3;
+
+		c.add(fill(-11, y - 1, 34, 11, y + 13, 72, "minecraft:black_concrete hollow"));
+		c.add(fill(-10, y - 1, 35, 10, y - 1, 71, "minecraft:light_blue_concrete"));
+		c.add(fill(-10, y + 6, 35, 10, y + 6, 71, "minecraft:cyan_concrete outline"));
+		c.add(fill(-2, y, 34, 2, y + 3, 34, "minecraft:air")); // the door from the hallway
+		for (int x : new int[] {-8, 0, 8}) {
+			for (int z : new int[] {42, 52, 62, 70}) {
+				c.add("setblock " + x + " " + (y + 13) + " " + z + " minecraft:sea_lantern");
+			}
+		}
+
+		// Stairs up to the start platform.
+		for (int k = 0; k < 4; k++) {
+			c.add(fill(-1, y, 36 + k, 1, y + k, 36 + k, "minecraft:blue_concrete"));
+		}
+		c.add(fill(-2, level, 39, 2, level, 41, "minecraft:lime_concrete"));
+
+		// 1. Stepping stones.
+		int[][] stones = {{0, 43}, {-1, 45}, {1, 47}, {-1, 49}, {1, 51}, {0, 53}};
+		for (int[] s : stones) {
+			c.add("setblock " + s[0] + " " + level + " " + s[1] + " minecraft:cyan_concrete");
+		}
+		// 2. Slippery ice.
+		c.add(fill(-1, level, 55, 1, level, 59, "minecraft:packed_ice"));
+		// 3. Climbing pillars.
+		c.add("setblock 0 " + (level + 1) + " 61 minecraft:orange_concrete");
+		c.add("setblock -1 " + (level + 2) + " 63 minecraft:orange_concrete");
+		c.add("setblock 1 " + (level + 3) + " 65 minecraft:orange_concrete");
+		// The finish.
+		c.add(fill(-2, level + 3, 67, 2, level + 3, 70, "minecraft:gold_block"));
+
+		c.add(display(0, y + 7.2, 40, 1.5, "center", 200,
+			new Text().add("OBSTACLE COURSE", "gold", true).nl()
+				.add("Falling is safe. Just walk back to the start.", "gray")));
+		c.add(display(0, y + 10.5, 69, 2, "center", 200,
+			new Text().add("YOU MADE IT!", "green", true)));
+		c.add(display(0, y + 3, 31, 1.2, "center", 200,
+			new Text().add("OBSTACLE COURSE ->", "gold", true)));
 		return c;
 	}
 

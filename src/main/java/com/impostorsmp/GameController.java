@@ -554,7 +554,7 @@ public final class GameController {
 
 	// ------------------------------------------------------------------ the sky lobby
 
-	private static final int[][] LOBBY_CORNERS = {{-12, -12}, {12, -12}, {-12, 38}, {12, 38}};
+	private static final int[][] LOBBY_CORNERS = {{-12, -12}, {12, -12}, {-12, 80}, {12, 80}};
 
 	/** Builds the lobby (after the chunks are loaded), moves everybody into it and makes it the world spawn. */
 	public void createLobby() {
@@ -620,7 +620,7 @@ public final class GameController {
 	/** True if a living player is still up in the lobby area. */
 	private boolean anyoneInLobby(int y) {
 		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-			if (!p.isSpectator() && p.getY() > y - 3 && Math.abs(p.getX()) < 40 && p.getZ() > -20 && p.getZ() < 45) {
+			if (!p.isSpectator() && p.getY() > y - 3 && Math.abs(p.getX()) < 40 && p.getZ() > -20 && p.getZ() < 90) {
 				return true;
 			}
 		}
