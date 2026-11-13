@@ -211,6 +211,7 @@ public final class GameController {
 		}
 		save();
 		recentHits.clear();
+		Fx.run(server, "time set day");
 
 		if (rules.bool("apply_gamerules")) {
 			applyGameRules();
@@ -228,6 +229,7 @@ public final class GameController {
 		if (fromLobby) {
 			Fx.run(server, "gamemode survival @a[gamemode=adventure]");
 			Fx.run(server, "effect clear @a minecraft:resistance");
+			Fx.run(server, "effect clear @a minecraft:saturation");
 			if (anyoneInLobby(lobbyY)) {
 				// The spread did not work for somebody. Keep the floor so nobody falls, and say so.
 				broadcast(Component.literal("Could not spread everybody out, so the lobby was kept. Fix the spread rules, then /imp lobby remove.")
@@ -598,6 +600,7 @@ public final class GameController {
 		Fx.run(server, "gamemode adventure @a");
 		Fx.run(server, "execute in minecraft:overworld run tp @a 0.5 " + y + " 0.5");
 		Fx.run(server, "effect give @a minecraft:resistance infinite 4 true");
+		Fx.run(server, "effect give @a minecraft:saturation infinite 0 true");
 		broadcast(Component.literal("The lobby is ready. Press the green button when everybody is here.")
 			.withStyle(ChatFormatting.GREEN));
 	}
@@ -606,6 +609,7 @@ public final class GameController {
 		Fx.run(server, "gamemode adventure " + name);
 		Fx.run(server, "execute in minecraft:overworld run tp " + name + " 0.5 " + y + " 0.5");
 		Fx.run(server, "effect give " + name + " minecraft:resistance infinite 4 true");
+		Fx.run(server, "effect give " + name + " minecraft:saturation infinite 0 true");
 	}
 
 	/** Deletes the lobby (blocks, texts, button) and stops keeping its chunks loaded. */
@@ -635,6 +639,7 @@ public final class GameController {
 		}
 		Fx.run(server, "gamemode survival @a[gamemode=adventure]");
 		Fx.run(server, "effect clear @a minecraft:resistance");
+			Fx.run(server, "effect clear @a minecraft:saturation");
 		Fx.run(server, "spreadplayers 0 0 0 30 false @a[gamemode=!spectator]");
 		if (anyoneInLobby(y)) {
 			throw new IllegalStateException("Could not move everybody out, so the lobby was kept.");
