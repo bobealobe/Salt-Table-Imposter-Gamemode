@@ -11,7 +11,25 @@ import java.util.Random;
  */
 final class Kit {
 	record Item(String id, int count) {
+		/** How many of this item fit in one inventory slot. */
+		int stackSize() {
+			return switch (id) {
+				case "minecraft:lava_bucket", "minecraft:powder_snow_bucket", "minecraft:flint_and_steel",
+					"minecraft:tnt_minecart" -> 1;
+				default -> 64;
+			};
+		}
+
+		/** The item split into legal stacks, e.g. 3 TNT minecarts are three stacks of 1. */
+		List<Integer> stacks() {
+			List<Integer> out = new ArrayList<>();
+			for (int left = count; left > 0; left -= stackSize()) {
+				out.add(Math.min(left, stackSize()));
+			}
+			return out;
+		}
 	}
+
 
 	/** One slot of the kit: a name shown to the player, the items it gives, and how likely it is. */
 	record Entry(String name, List<Item> items, int weight) {
@@ -44,8 +62,8 @@ final class Kit {
 	static final List<Entry> BUNDLES = List.of(
 		new Entry("Piston trap set (8 sticky piston, 8 observer, 20 redstone dust, 4 repeater)",
 			List.of(i("sticky_piston", 8), i("observer", 8), i("redstone", 20), i("repeater", 4)), 3),
-		new Entry("Pitfall set (16 scaffolding, 4 observer, 4 sticky piston)",
-			List.of(i("scaffolding", 16), i("observer", 4), i("sticky_piston", 4)), 2),
+		new Entry("Pitfall set (32 scaffolding, 4 observer, 4 sticky piston)",
+			List.of(i("scaffolding", 32), i("observer", 4), i("sticky_piston", 4)), 2),
 		new Entry("TNT set (5 TNT, 4 observer, 12 redstone dust)",
 			List.of(i("tnt", 5), i("observer", 4), i("redstone", 12)), 2),
 		new Entry("Minecart set (3 TNT minecart, 16 rail, 4 powered rail)",
@@ -55,8 +73,9 @@ final class Kit {
 	}
 
 	/**
-	 * One fast item, then {@code builders} different builder slots. Each builder slot is a ready-made set
-	 * with a {@code bundleChance} percent chance, otherwise a single item.
+	 * One fast item, then {@code builders} different builder slots. Only the last builder slot can be a
+	 * ready-made set (with a {@code bundleChance} percent chance); every slot before it is a single item.
+	 * So a kit never has more than one set.
 	 */
 	static List<Entry> roll(Random random, int builders, int bundleChance) {
 		List<Entry> result = new ArrayList<>();
@@ -64,7 +83,8 @@ final class Kit {
 		List<Entry> singles = new ArrayList<>(SINGLES);
 		List<Entry> bundles = new ArrayList<>(BUNDLES);
 		for (int n = 0; n < builders; n++) {
-			boolean useBundle = !bundles.isEmpty() && (singles.isEmpty() || random.nextInt(100) < bundleChance);
+			boolean last = n == builders - 1;
+			boolean useBundle = !bundles.isEmpty() && (singles.isEmpty() || (last && random.nextInt(100) < bundleChance));
 			List<Entry> from = useBundle ? bundles : singles;
 			if (from.isEmpty()) {
 				break;

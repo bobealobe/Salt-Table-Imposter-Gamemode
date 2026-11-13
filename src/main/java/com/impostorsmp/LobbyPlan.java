@@ -354,7 +354,7 @@ final class LobbyPlan {
 		for (Kit.Entry e : Kit.SINGLES) {
 			singles.nl().add("- " + e.name(), "white");
 		}
-		singles.nl().add("Each slot may be a SET instead (" + r.integer("impostor_kit_set_chance") + "%)", "yellow");
+		singles.nl().add("The last slot may be a SET instead (" + r.integer("impostor_kit_set_chance") + "%)", "yellow");
 		c.add(display(0, y + 3.5, 1, 0.9, "left", 130, singles));
 
 		Text sets = new Text().add("READY-MADE SETS", "gold", true);

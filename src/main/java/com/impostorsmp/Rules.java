@@ -41,7 +41,7 @@ public final class Rules {
 		bool("anti_rdm_escalate", true, "Every repeat offence doubles the time and adds a slowness level."),
 		bool("impostor_kit", true, "Each impostor starts with a random trap kit: one fast trap item plus some building items."),
 		integer("impostor_kit_builders", 2, 1, 4, "How many building items are in each impostor's kit."),
-		integer("impostor_kit_set_chance", 40, 0, 100, "Percent chance that a building slot is a ready-made set (piston trap, TNT, ...) instead of a single item."),
+		integer("impostor_kit_set_chance", 40, 0, 100, "Percent chance that the last building slot is a ready-made set (piston trap, TNT, ...) instead of a single item."),
 		bool("accuse", true, "Players can call each other out with /imp accuse <player>."),
 		integer("accuse_votes", 3, 2, 5, "How many living players must accuse the same person to settle their role."),
 		bool("false_accuse_punish", true, "If the accused turns out innocent, everybody who accused them is punished."),
