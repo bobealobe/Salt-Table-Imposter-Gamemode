@@ -378,7 +378,13 @@ final class LobbyPlan {
 	/** The rules, small and out of the way, inside the side corridor. */
 	private static List<String> corridorTexts(int y, Rules r) {
 		List<String> c = new ArrayList<>();
-		List<RulesLayout.Section> sections = RulesLayout.sections(Rules.DEFS);
+		// The secret items section is never shown in the lobby: the whole point is that nobody knows.
+		List<RulesLayout.Section> sections = new ArrayList<>();
+		for (RulesLayout.Section candidate : RulesLayout.sections(Rules.DEFS)) {
+			if (!candidate.title().equals("Secret items")) {
+				sections.add(candidate);
+			}
+		}
 		for (int i = 0; i < sections.size(); i++) {
 			RulesLayout.Section section = sections.get(i);
 			Text t = new Text().add(section.title(), "aqua", true);

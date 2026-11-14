@@ -30,10 +30,14 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.StructureTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
@@ -50,6 +54,9 @@ public final class GameController {
 	private final Map<UUID, Integer> lastAccuse = new HashMap<>();
 	/** The spot each nearest-player compass was last aimed at, so it is only replaced when the target moves. */
 	private final Map<UUID, String> lastCompassTarget = new HashMap<>();
+	private final Random random = new Random();
+	/** Players who are under a Vanish Cloak right now, and what was tucked away for them. */
+	private final Map<UUID, List<Stashed>> vanished = new HashMap<>();
 	private BlockPos strongholdPos;
 	private boolean strongholdSearched;
 
@@ -94,10 +101,19 @@ public final class GameController {
 		if (rules.bool("block_totems")) {
 			stripTotems();
 		}
+		if (rules.bool("secret_item")) {
+			oneShotArrows();
+		}
+		if (!vanished.isEmpty()) {
+			tickVanish();
+		}
 		if (state.phase() == Phase.RUNNING) {
 			int tick = server.getTickCount();
 			if (tick % 20 == 0) {
 				state.addSecond();
+				if (rules.bool("secret_item")) {
+					secretSecond();
+				}
 				if (state.elapsedSeconds() % 60 == 0) {
 					save(); // keeps the game clock if the world is closed without a clean shutdown
 				}
@@ -319,6 +335,284 @@ public final class GameController {
 			player.sendSystemMessage(Component.literal("After " + rules.integer("compass_minutes")
 				+ " minutes you can choose a compass (you will get buttons in chat).").withStyle(ChatFormatting.GRAY));
 		}
+		rollSecret(player);
+	}
+
+	// ------------------------------------------------------------------ secret items
+
+	private record Stashed(EquipmentSlot slot, int hotbar, int mainIndex, ItemStack stack) {
+	}
+
+	/** Decides, once per impostor, whether they get a secret item, and tells them (the item itself comes later). */
+	private void rollSecret(ServerPlayer player) {
+		if (!rules.bool("secret_item")) {
+			state.setSecret(player.getUUID(), null);
+			return;
+		}
+		Secret.Kind kind = Secret.roll(random, rules.integer("secret_item_chance"));
+		state.setSecret(player.getUUID(), kind == null ? null : kind.name());
+		save();
+		if (kind == null) {
+			player.sendSystemMessage(Component.literal("You have no secret item this game.").withStyle(ChatFormatting.DARK_GRAY));
+			return;
+		}
+		int delay = rules.integer("secret_item_delay_minutes");
+		if (delay <= 0) {
+			deliverSecret(player, kind);
+		} else {
+			player.sendSystemMessage(Component.literal("You WILL receive a secret item " + delay + " minutes into the game.")
+				.withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD));
+		}
+	}
+
+	/** Once a second: hands out secret items that are due. */
+	private void secretSecond() {
+		int due = rules.integer("secret_item_delay_minutes") * 60;
+		if (state.elapsedSeconds() < due) {
+			return;
+		}
+		for (Member m : state.members()) {
+			String kindName = state.secretKind(m.id());
+			if (kindName == null || state.secretGiven(m.id()) || !m.alive()) {
+				continue;
+			}
+			ServerPlayer p = server.getPlayerList().getPlayer(m.id());
+			if (p == null) {
+				continue;
+			}
+			try {
+				deliverSecret(p, Secret.Kind.valueOf(kindName));
+			} catch (IllegalArgumentException e) {
+				state.markSecretGiven(m.id());
+			}
+		}
+	}
+
+	private void deliverSecret(ServerPlayer p, Secret.Kind kind) {
+		state.markSecretGiven(p.getUUID());
+		save();
+		placeItem(p, Secret.itemText(kind));
+		p.sendSystemMessage(Component.literal("SECRET ITEM: " + Secret.name(kind) + " (in your inventory)")
+			.withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD));
+		p.sendSystemMessage(Component.literal(Secret.howToUse(kind, rules.integer("secret_vanish_seconds"))).withStyle(ChatFormatting.GRAY));
+		Fx.sound(server, p.getGameProfile().name(), "minecraft:entity.experience_orb.pickup", 0.5, 0.8);
+	}
+
+	/** Test helper: gives the host a secret item. */
+	public void giveSecretTest(ServerPlayer p, Secret.Kind kind) {
+		deliverSecret(p, kind);
+	}
+
+	/** Puts an item in a free main-inventory slot (then the hotbar) without a pickup sound; gives it normally if that fails. */
+	private void placeItem(ServerPlayer p, String item) {
+		String name = p.getGameProfile().name();
+		Inventory inventory = p.getInventory();
+		int slot = -1;
+		for (int s = 9; slot < 0 && s < 36; s++) {
+			if (inventory.getItem(s).isEmpty()) {
+				slot = s;
+			}
+		}
+		for (int s = 0; slot < 0 && s < 9; s++) {
+			if (inventory.getItem(s).isEmpty()) {
+				slot = s;
+			}
+		}
+		if (slot >= 0) {
+			String error = Fx.runChecked(server, "item replace entity " + name + " " + slotName(slot) + " with " + item);
+			if (error == null) {
+				return;
+			}
+			ImpostorLog.warn("Secret item could not be placed silently: " + error);
+		}
+		String error = Fx.runChecked(server, "give " + name + " " + item + " 1");
+		if (error != null) {
+			ImpostorLog.warn("Secret item could not be given: " + error);
+		}
+	}
+
+	/** Right-click with a secret item. Returns SUCCESS when the item was used up, PASS to let Minecraft carry on. */
+	public InteractionResult onUseItem(Player player, InteractionHand hand) {
+		if (!(player instanceof ServerPlayer p) || !rules.bool("secret_item")) {
+			return InteractionResult.PASS;
+		}
+		ItemStack stack = p.getItemInHand(hand);
+		if (stack.isEmpty()) {
+			return InteractionResult.PASS;
+		}
+		Secret.Kind kind = Secret.kindForName(stack.getHoverName().getString());
+		if (kind == null || kind == Secret.Kind.ONE_SHOT) {
+			return InteractionResult.PASS; // the arrow is used by a dispenser, not by hand
+		}
+		if (kind == Secret.Kind.VANISH && vanished.containsKey(p.getUUID())) {
+			p.sendSystemMessage(Component.literal("You are already vanished.").withStyle(ChatFormatting.RED), true);
+			return InteractionResult.FAIL;
+		}
+		stack.shrink(1); // first, so a cloak in the hotbar is not tucked away with the rest
+		switch (kind) {
+			case VANISH -> startVanish(p, rules.integer("secret_vanish_seconds"));
+			case HORN -> useHorn(p);
+			case LOOTBOX -> useLootbox(p);
+			default -> { }
+		}
+		return InteractionResult.SUCCESS;
+	}
+
+	private void useHorn(ServerPlayer p) {
+		Secret.Mob mob = Secret.hornRoll(random);
+		ServerPlayer target = rules.bool("secret_horn_on_nearest") ? nearestOther(p) : null;
+		String at = (target != null ? target : p).getGameProfile().name();
+		for (String command : Secret.summonCommands(mob, random)) {
+			Fx.run(server, "execute at " + at + " run " + command);
+		}
+		p.sendSystemMessage(Component.literal("The horn answers: " + Secret.mobLabel(mob)
+			+ (target != null ? " appears around the nearest player." : " appears around you.")).withStyle(ChatFormatting.GOLD));
+	}
+
+	private void useLootbox(ServerPlayer p) {
+		String[] label = new String[1];
+		String name = p.getGameProfile().name();
+		for (Secret.Drop drop : Secret.lootbox(random, label)) {
+			String error = Fx.runChecked(server, "give " + name + " " + drop.itemText() + " " + drop.count());
+			if (error != null) {
+				ImpostorLog.warn("Lootbox item " + drop.id() + " could not be given: " + error);
+			}
+		}
+		p.sendSystemMessage(Component.literal("Lootbox: " + label[0] + "!").withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
+	}
+
+	private static int freeMainSlot(Inventory inventory) {
+		for (int s = 9; s < 36; s++) {
+			if (inventory.getItem(s).isEmpty()) {
+				return s;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Vanish: invisibility with no particles and no nametag, and armor, offhand and hotbar tucked into the
+	 * main inventory (a worn armor piece or a held item stays visible even on an invisible player). Nothing is
+	 * ever deleted: if something can't be hidden because the inventory is full, it just stays where it is.
+	 */
+	private void startVanish(ServerPlayer p, int seconds) {
+		UUID id = p.getUUID();
+		String name = p.getGameProfile().name();
+		Inventory inventory = p.getInventory();
+		List<Stashed> stash = new ArrayList<>();
+		int visible = 0;
+		for (EquipmentSlot slot : new EquipmentSlot[] {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
+			EquipmentSlot.FEET, EquipmentSlot.OFFHAND}) {
+			ItemStack worn = p.getItemBySlot(slot);
+			if (worn.isEmpty()) {
+				continue;
+			}
+			int free = freeMainSlot(inventory);
+			if (free < 0) {
+				visible++;
+				continue;
+			}
+			inventory.setItem(free, worn);
+			p.setItemSlot(slot, ItemStack.EMPTY);
+			stash.add(new Stashed(slot, -1, free, worn));
+		}
+		for (int h = 0; h < 9; h++) {
+			ItemStack held = inventory.getItem(h);
+			if (held.isEmpty()) {
+				continue;
+			}
+			int free = freeMainSlot(inventory);
+			if (free < 0) {
+				visible++;
+				continue;
+			}
+			inventory.setItem(free, held);
+			inventory.setItem(h, ItemStack.EMPTY);
+			stash.add(new Stashed(null, h, free, held));
+		}
+		vanished.put(id, stash);
+		Fx.run(server, "team add impostorsmp_vanish");
+		Fx.run(server, "team modify impostorsmp_vanish nametagVisibility never");
+		Fx.run(server, "team join impostorsmp_vanish " + name);
+		Fx.run(server, "effect give " + name + " minecraft:invisibility " + seconds + " 0 true");
+		p.sendSystemMessage(Component.literal("You vanish for " + seconds + " seconds. Your hotbar and armor are in your inventory."
+			+ (visible > 0 ? " Your inventory was too full to hide " + visible + " item(s)." : "")).withStyle(ChatFormatting.DARK_PURPLE));
+		scheduler.after(seconds * 20L, () -> endVanish(id));
+	}
+
+	/** While vanished, anything that ends up in the hotbar or offhand is tucked away again. */
+	private void tickVanish() {
+		for (UUID id : vanished.keySet()) {
+			ServerPlayer p = server.getPlayerList().getPlayer(id);
+			if (p == null) {
+				continue;
+			}
+			Inventory inventory = p.getInventory();
+			for (int h = 0; h < 9; h++) {
+				ItemStack held = inventory.getItem(h);
+				int free = held.isEmpty() ? -1 : freeMainSlot(inventory);
+				if (free >= 0) {
+					inventory.setItem(free, held);
+					inventory.setItem(h, ItemStack.EMPTY);
+				}
+			}
+			ItemStack off = p.getItemBySlot(EquipmentSlot.OFFHAND);
+			int free = off.isEmpty() ? -1 : freeMainSlot(inventory);
+			if (free >= 0) {
+				inventory.setItem(free, off);
+				p.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+			}
+		}
+	}
+
+	private void endVanish(UUID id) {
+		List<Stashed> stash = vanished.remove(id);
+		if (stash == null) {
+			return;
+		}
+		ServerPlayer p = server.getPlayerList().getPlayer(id);
+		if (p == null) {
+			return; // offline: everything is still safe in their inventory
+		}
+		Inventory inventory = p.getInventory();
+		for (Stashed part : stash) {
+			if (inventory.getItem(part.mainIndex()) != part.stack()) {
+				continue; // they moved it themselves; leave it alone
+			}
+			if (part.slot() != null) {
+				if (p.getItemBySlot(part.slot()).isEmpty()) {
+					p.setItemSlot(part.slot(), part.stack());
+					inventory.setItem(part.mainIndex(), ItemStack.EMPTY);
+				}
+			} else if (inventory.getItem(part.hotbar()).isEmpty()) {
+				inventory.setItem(part.hotbar(), part.stack());
+				inventory.setItem(part.mainIndex(), ItemStack.EMPTY);
+			}
+		}
+		String name = p.getGameProfile().name();
+		Fx.run(server, "effect clear " + name + " minecraft:invisibility");
+		Fx.run(server, "team leave " + name);
+		p.sendSystemMessage(Component.literal("You are visible again.").withStyle(ChatFormatting.DARK_PURPLE));
+	}
+
+	private void endAllVanish() {
+		for (UUID id : new ArrayList<>(vanished.keySet())) {
+			endVanish(id);
+		}
+	}
+
+	/**
+	 * One Shot One Kill: an arrow with that name that comes out of a DISPENSER gets absurd damage and can't be
+	 * picked up. Arrows from a bow or crossbow carry a "weapon" tag and are left alone. Each arrow is looked at once.
+	 */
+	private void oneShotArrows() {
+		String seen = "tag=!impostorsmp_seen";
+		String oneShot = "@e[type=minecraft:arrow," + seen
+			+ ",nbt={item:{components:{\"minecraft:custom_data\":{impostorsmp:\"one_shot\"}}}}]";
+		Fx.run(server, "execute as @e[type=minecraft:arrow," + seen + ",nbt={weapon:{}}] run tag @s add impostorsmp_seen");
+		Fx.run(server, "execute as " + oneShot + " run data modify entity @s damage set value 1000.0d");
+		Fx.run(server, "execute as " + oneShot + " run data modify entity @s pickup set value 0b");
+		Fx.run(server, "execute as @e[type=minecraft:arrow," + seen + "] run tag @s add impostorsmp_seen");
 	}
 
 	// ------------------------------------------------------------------ impostor compasses
@@ -589,6 +883,7 @@ public final class GameController {
 
 	/** Cancels the current game without a winner. */
 	public void stop() {
+		endAllVanish();
 		scheduler.clear();
 		state.reset();
 		lastAccuse.clear();
@@ -754,6 +1049,7 @@ public final class GameController {
 	}
 
 	private void finish(Outcome outcome, String reason) {
+		endAllVanish();
 		state.finish(outcome);
 		save();
 
@@ -956,8 +1252,9 @@ public final class GameController {
 	/** Anything that is not a player, a text or an item is removed from the lobby once a second (mobs, mostly). */
 	private void purgeLobbyMobs() {
 		int y = rules.lobbyY();
-		Fx.run(server, "kill @e[type=!minecraft:player,type=!minecraft:text_display,type=!minecraft:item,"
-			+ "type=!minecraft:armor_stand,x=-36,y=" + (y - 2) + ",z=-14,dx=50,dy=24,dz=70]");
+		// "execute as ... run kill @s" so that an empty area is not logged as a failed command every second.
+		Fx.run(server, "execute as @e[type=!minecraft:player,type=!minecraft:text_display,type=!minecraft:item,"
+			+ "type=!minecraft:armor_stand,x=-36,y=" + (y - 2) + ",z=-14,dx=50,dy=24,dz=70] run kill @s");
 	}
 
 	/**

@@ -70,6 +70,8 @@ public final class GameState {
 	private final Map<UUID, UUID> votes = new LinkedHashMap<>(); // accuser -> accused
 	private final Map<UUID, Integer> strikes = new HashMap<>();
 	private final Map<UUID, Integer> compass = new HashMap<>(); // impostor -> CompassPlan stage
+	private final Map<UUID, String> secretKind = new HashMap<>(); // impostor -> Secret.Kind name (only those who get one)
+	private final Set<UUID> secretGiven = new HashSet<>();
 	private int elapsedSeconds; // seconds the game has been running (countdown not included)
 
 	public enum AccuseStatus { NOT_RUNNING, ACCUSER_OUT, TARGET_INVALID, ALREADY_KNOWN, VOTE, EXPOSED, CLEARED }
@@ -228,7 +230,32 @@ public final class GameState {
 		compass.put(id, stage);
 	}
 
+	/** The secret item this impostor will get (or null), and whether it was handed over already. */
+	public String secretKind(UUID id) {
+		return secretKind.get(id);
+	}
+
+	public boolean secretGiven(UUID id) {
+		return secretGiven.contains(id);
+	}
+
+	/** Assigns the secret item (null = this impostor gets none). Resets the "handed over" mark. */
+	public void setSecret(UUID id, String kind) {
+		if (kind == null) {
+			secretKind.remove(id);
+		} else {
+			secretKind.put(id, kind);
+		}
+		secretGiven.remove(id);
+	}
+
+	public void markSecretGiven(UUID id) {
+		secretGiven.add(id);
+	}
+
 	private void clearExtras() {
+		secretKind.clear();
+		secretGiven.clear();
 		compass.clear();
 		elapsedSeconds = 0;
 		exposed.clear();
@@ -397,6 +424,14 @@ public final class GameState {
 			k++;
 		}
 		p.setProperty("elapsed", Integer.toString(elapsedSeconds));
+		p.setProperty("secrets", Integer.toString(secretKind.size()));
+		int sk = 0;
+		for (Map.Entry<UUID, String> e : secretKind.entrySet()) {
+			p.setProperty("k." + sk + ".id", e.getKey().toString());
+			p.setProperty("k." + sk + ".kind", e.getValue());
+			p.setProperty("k." + sk + ".given", Boolean.toString(secretGiven.contains(e.getKey())));
+			sk++;
+		}
 		p.setProperty("compasses", Integer.toString(compass.size()));
 		int c = 0;
 		for (Map.Entry<UUID, Integer> e : compass.entrySet()) {
@@ -469,6 +504,14 @@ public final class GameState {
 				state.strikes.put(UUID.fromString(p.getProperty("s." + i + ".id")), Integer.parseInt(p.getProperty("s." + i + ".n")));
 			}
 			state.elapsedSeconds = Integer.parseInt(p.getProperty("elapsed", "0"));
+			int secretCount = Integer.parseInt(p.getProperty("secrets", "0"));
+			for (int i = 0; i < secretCount; i++) {
+				UUID id = UUID.fromString(p.getProperty("k." + i + ".id"));
+				state.secretKind.put(id, p.getProperty("k." + i + ".kind"));
+				if (Boolean.parseBoolean(p.getProperty("k." + i + ".given", "false"))) {
+					state.secretGiven.add(id);
+				}
+			}
 			int compassCount = Integer.parseInt(p.getProperty("compasses", "0"));
 			for (int i = 0; i < compassCount; i++) {
 				state.compass.put(UUID.fromString(p.getProperty("c." + i + ".id")), Integer.parseInt(p.getProperty("c." + i + ".stage")));

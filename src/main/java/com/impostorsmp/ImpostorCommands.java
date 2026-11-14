@@ -59,7 +59,12 @@ final class ImpostorCommands {
 				.then(Commands.literal("impostor").executes(ctx -> startTest(ctx.getSource(), Role.IMPOSTOR)))
 				.then(Commands.literal("innocent").executes(ctx -> startTest(ctx.getSource(), Role.INNOCENT)))
 				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource())))
-				.then(Commands.literal("compass").executes(ctx -> testCompass(ctx.getSource()))));
+				.then(Commands.literal("compass").executes(ctx -> testCompass(ctx.getSource())))
+				.then(Commands.literal("secret")
+					.then(Commands.literal("vanish").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.VANISH)))
+					.then(Commands.literal("arrow").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.ONE_SHOT)))
+					.then(Commands.literal("horn").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.HORN)))
+					.then(Commands.literal("lootbox").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.LOOTBOX)))));
 			root.then(admin("lobby")
 				.executes(ctx -> lobby(ctx.getSource()))
 				.then(Commands.literal("remove").executes(ctx -> lobbyRemove(ctx.getSource()))));
@@ -135,7 +140,7 @@ final class ImpostorCommands {
 		say(src, "/imp role - see your own role");
 		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
 		say(src, "/imp compass player|stronghold - impostors only: pick your compass once it is offered (chat buttons do the same)");
-		say(src, "Solo test (host): /imp test impostor | innocent | kit | compass (skips the clock to the compass offer)");
+		say(src, "Solo test (host): /imp test impostor | innocent | kit | compass (skips the clock to the compass offer) | secret vanish|arrow|horn|lootbox");
 		say(src, "Lobby (host): /imp lobby builds a sky lobby with a start button, /imp lobby remove takes it down");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
@@ -182,6 +187,20 @@ final class ImpostorCommands {
 			return 0;
 		}
 		game.chooseCompass(src.getPlayerOrException(), choice);
+		return 1;
+	}
+
+	private static int testSecret(CommandSourceStack src, Secret.Kind kind) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		ServerPlayer player = src.getPlayer();
+		if (player == null) {
+			src.sendFailure(Component.literal("Run this as a player."));
+			return 0;
+		}
+		game.giveSecretTest(player, kind);
 		return 1;
 	}
 
