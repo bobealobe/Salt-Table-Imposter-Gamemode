@@ -51,11 +51,15 @@ final class ImpostorCommands {
 				.then(Commands.literal("clear").executes(ctx -> clearAccusation(ctx.getSource())))
 				.then(Commands.argument("player", EntityArgument.player())
 					.executes(ctx -> accuse(ctx.getSource(), EntityArgument.getPlayer(ctx, "player")))));
+			root.then(Commands.literal("compass")
+				.then(Commands.literal("player").executes(ctx -> compass(ctx.getSource(), CompassPlan.Choice.NEAREST_PLAYER)))
+				.then(Commands.literal("stronghold").executes(ctx -> compass(ctx.getSource(), CompassPlan.Choice.STRONGHOLD))));
 			root.then(admin("start").executes(ctx -> start(ctx.getSource())));
 			root.then(admin("test")
 				.then(Commands.literal("impostor").executes(ctx -> startTest(ctx.getSource(), Role.IMPOSTOR)))
 				.then(Commands.literal("innocent").executes(ctx -> startTest(ctx.getSource(), Role.INNOCENT)))
-				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource()))));
+				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource())))
+				.then(Commands.literal("compass").executes(ctx -> testCompass(ctx.getSource()))));
 			root.then(admin("lobby")
 				.executes(ctx -> lobby(ctx.getSource()))
 				.then(Commands.literal("remove").executes(ctx -> lobbyRemove(ctx.getSource()))));
@@ -130,7 +134,8 @@ final class ImpostorCommands {
 	private static int help(CommandSourceStack src) {
 		say(src, "/imp role - see your own role");
 		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
-		say(src, "Solo test (host): /imp test impostor | innocent | kit");
+		say(src, "/imp compass player|stronghold - impostors only: pick your compass once it is offered (chat buttons do the same)");
+		say(src, "Solo test (host): /imp test impostor | innocent | kit | compass (skips the clock to the compass offer)");
 		say(src, "Lobby (host): /imp lobby builds a sky lobby with a start button, /imp lobby remove takes it down");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
@@ -168,6 +173,25 @@ final class ImpostorCommands {
 		}
 		ServerPlayer player = src.getPlayerOrException();
 		game.accuse(player, target);
+		return 1;
+	}
+
+	private static int compass(CommandSourceStack src, CompassPlan.Choice choice) throws CommandSyntaxException {
+		GameController game = game(src);
+		if (game == null) {
+			return 0;
+		}
+		game.chooseCompass(src.getPlayerOrException(), choice);
+		return 1;
+	}
+
+	private static int testCompass(CommandSourceStack src) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		game.skipToCompass();
+		say(src, "Game clock set to one second before the compass is offered.");
 		return 1;
 	}
 

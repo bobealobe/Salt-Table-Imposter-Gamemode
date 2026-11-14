@@ -21,16 +21,22 @@ import com.impostorsmp.GameState.Role;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.StructureTags;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
 
 /** Runs the actual game: picking roles, the countdown, deaths, win conditions. One per world that is opened. */
 public final class GameController {
@@ -42,6 +48,10 @@ public final class GameController {
 	private final Course course = new Course();
 	/** Server tick of each player's last accusation, for the cooldown. Not kept across restarts. */
 	private final Map<UUID, Integer> lastAccuse = new HashMap<>();
+	/** The spot each nearest-player compass was last aimed at, so it is only replaced when the target moves. */
+	private final Map<UUID, String> lastCompassTarget = new HashMap<>();
+	private BlockPos strongholdPos;
+	private boolean strongholdSearched;
 
 	GameController(MinecraftServer server, Path configDir) {
 		this.server = server;
@@ -83,6 +93,21 @@ public final class GameController {
 		scheduler.tick();
 		if (rules.bool("block_totems")) {
 			stripTotems();
+		}
+		if (state.phase() == Phase.RUNNING) {
+			int tick = server.getTickCount();
+			if (tick % 20 == 0) {
+				state.addSecond();
+				if (state.elapsedSeconds() % 60 == 0) {
+					save(); // keeps the game clock if the world is closed without a clean shutdown
+				}
+				if (rules.bool("compass")) {
+					compassSecond();
+				}
+			}
+			if (rules.bool("compass") && tick % (rules.integer("compass_refresh_seconds") * 20) == 0) {
+				refreshCompasses();
+			}
 		}
 		int lobby = rules.lobbyY();
 		if (lobby >= 0) {
@@ -132,6 +157,7 @@ public final class GameController {
 		}
 		save();
 		lastAccuse.clear();
+		clearCompassCache();
 		Fx.run(server, "time set day");
 
 		if (rules.bool("apply_gamerules")) {
@@ -289,6 +315,270 @@ public final class GameController {
 			player.sendSystemMessage(Component.literal(" - " + label + ": " + slot.name()).withStyle(ChatFormatting.GOLD));
 		}
 		player.sendSystemMessage(Component.literal("Keep it out of your hands while others are watching.").withStyle(ChatFormatting.GRAY));
+		if (rules.bool("compass")) {
+			player.sendSystemMessage(Component.literal("After " + rules.integer("compass_minutes")
+				+ " minutes you can choose a compass (you will get buttons in chat).").withStyle(ChatFormatting.GRAY));
+		}
+	}
+
+	// ------------------------------------------------------------------ impostor compasses
+
+	private static final String COMPASS_NAME = "Impostor Compass";
+
+	private void clearCompassCache() {
+		lastCompassTarget.clear();
+		strongholdPos = null;
+		strongholdSearched = false;
+	}
+
+	/** Once a second while the game runs: sends the offer, and hands out stronghold compasses that are due. */
+	private void compassSecond() {
+		int elapsed = state.elapsedSeconds();
+		int offer = rules.integer("compass_minutes");
+		int wait = rules.integer("compass_wait_minutes");
+		for (Member m : state.members()) {
+			if (m.role() != Role.IMPOSTOR || !m.alive()) {
+				continue;
+			}
+			ServerPlayer p = server.getPlayerList().getPlayer(m.id());
+			if (p == null) {
+				continue;
+			}
+			int stage = state.compassStage(m.id());
+			if (CompassPlan.offerDue(stage, elapsed, offer)) {
+				state.setCompassStage(m.id(), CompassPlan.OFFERED);
+				save();
+				sendCompassOffer(p);
+			} else if (CompassPlan.strongholdDue(stage, elapsed, offer, wait)) {
+				state.setCompassStage(m.id(), CompassPlan.STRONGHOLD);
+				save();
+				giveStrongholdCompass(p);
+			}
+		}
+	}
+
+	private void sendCompassOffer(ServerPlayer p) {
+		int wait = rules.integer("compass_wait_minutes");
+		p.sendSystemMessage(Component.literal("Your impostor compass is ready. Pick ONE:").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+		MutableComponent line = Component.literal("  ")
+			.append(chatButton("Nearest player", ChatFormatting.GREEN, "imp compass player",
+				"Points at the closest other player. Yours right now."))
+			.append(Component.literal("   "))
+			.append(chatButton("Stronghold", ChatFormatting.AQUA, "imp compass stronghold",
+				"Points at the stronghold. Arrives " + wait + " minutes after the offer."));
+		p.sendSystemMessage(line);
+	}
+
+	private static Component chatButton(String label, ChatFormatting color, String command, String tooltip) {
+		return Component.literal("[" + label + "]").setStyle(Style.EMPTY.withColor(color)
+			.withClickEvent(new ClickEvent.RunCommand(command))
+			.withHoverEvent(new HoverEvent.ShowText(Component.literal(tooltip))));
+	}
+
+	/** A player picked a compass (clicked a button or typed /imp compass player|stronghold). */
+	public void chooseCompass(ServerPlayer p, CompassPlan.Choice choice) {
+		Optional<Member> member = state.member(p.getUUID());
+		if (state.phase() != Phase.RUNNING || member.isEmpty() || member.get().role() != Role.IMPOSTOR || !member.get().alive()) {
+			p.sendSystemMessage(Component.literal("Only a living impostor in a running game can pick a compass.").withStyle(ChatFormatting.RED));
+			return;
+		}
+		if (!rules.bool("compass")) {
+			p.sendSystemMessage(Component.literal("Compasses are switched off.").withStyle(ChatFormatting.RED));
+			return;
+		}
+		int offer = rules.integer("compass_minutes");
+		int wait = rules.integer("compass_wait_minutes");
+		int stage = state.compassStage(p.getUUID());
+		switch (CompassPlan.choose(stage, choice, state.elapsedSeconds(), offer, wait)) {
+			case NOT_YET -> p.sendSystemMessage(Component.literal("Not yet. The compass unlocks after " + offer + " minutes.").withStyle(ChatFormatting.RED));
+			case ALREADY_CHOSEN -> {
+				if (stage == CompassPlan.NEAREST && !hasCompass(p)) {
+					giveNearestCompass(p);
+				} else if (stage == CompassPlan.STRONGHOLD && !hasCompass(p)) {
+					giveStrongholdCompass(p);
+				} else if (stage == CompassPlan.WAITING) {
+					int left = CompassPlan.secondsUntilStronghold(state.elapsedSeconds(), offer, wait);
+					p.sendSystemMessage(Component.literal("Your stronghold compass arrives in " + AccuseGate.format(left) + ".").withStyle(ChatFormatting.GRAY));
+				} else {
+					p.sendSystemMessage(Component.literal("You already chose your compass.").withStyle(ChatFormatting.RED));
+				}
+			}
+			case GIVE_NEAREST -> {
+				state.setCompassStage(p.getUUID(), CompassPlan.NEAREST);
+				save();
+				giveNearestCompass(p);
+			}
+			case WAIT_FOR_STRONGHOLD -> {
+				state.setCompassStage(p.getUUID(), CompassPlan.WAITING);
+				save();
+				int left = CompassPlan.secondsUntilStronghold(state.elapsedSeconds(), offer, wait);
+				p.sendSystemMessage(Component.literal("You will get the stronghold compass in " + AccuseGate.format(left) + ".").withStyle(ChatFormatting.AQUA));
+			}
+			case GIVE_STRONGHOLD -> {
+				state.setCompassStage(p.getUUID(), CompassPlan.STRONGHOLD);
+				save();
+				giveStrongholdCompass(p);
+			}
+		}
+	}
+
+	/** Test helper: jumps the game clock to the moment the compass is offered. */
+	public void skipToCompass() {
+		if (state.phase() == Phase.RUNNING) {
+			state.setElapsedSeconds(rules.integer("compass_minutes") * 60 - 1);
+			save();
+		}
+	}
+
+	private void giveNearestCompass(ServerPlayer p) {
+		ServerPlayer target = nearestOther(p);
+		int x = (int) Math.floor(target != null ? target.getX() : p.getX());
+		int y = (int) Math.floor(target != null ? target.getY() : p.getY());
+		int z = (int) Math.floor(target != null ? target.getZ() : p.getZ());
+		placeCompass(p, compassItem("nearest player", x, y, z, dimensionId(p)));
+		lastCompassTarget.remove(p.getUUID());
+		p.sendSystemMessage(Component.literal(target != null
+			? "Nearest-player compass added to your inventory. It updates every few seconds."
+			: "Nearest-player compass added. Nobody else is in this dimension right now; it will lock on when somebody is.")
+			.withStyle(ChatFormatting.GREEN));
+	}
+
+	private void giveStrongholdCompass(ServerPlayer p) {
+		BlockPos pos = strongholdPos();
+		if (pos == null) {
+			p.sendSystemMessage(Component.literal("The stronghold could not be found, so no compass could be made. Tell the host.").withStyle(ChatFormatting.RED));
+			return;
+		}
+		placeCompass(p, compassItem("stronghold", pos.getX(), pos.getY(), pos.getZ(), "minecraft:overworld"));
+		p.sendSystemMessage(Component.literal("Stronghold compass added to your inventory. It only works in the Overworld.").withStyle(ChatFormatting.AQUA));
+	}
+
+	private BlockPos strongholdPos() {
+		if (!strongholdSearched) {
+			strongholdSearched = true;
+			try {
+				strongholdPos = server.overworld().findNearestMapStructure(StructureTags.EYE_OF_ENDER_LOCATED, BlockPos.ZERO, 100, false);
+			} catch (RuntimeException e) {
+				ImpostorLog.warn("Could not locate the stronghold: " + e);
+			}
+		}
+		return strongholdPos;
+	}
+
+	private static String compassItem(String label, int x, int y, int z, String dimension) {
+		return "minecraft:compass[minecraft:lodestone_tracker={target:{pos:[I;" + x + "," + y + "," + z + "],dimension:\""
+			+ dimension + "\"},tracked:false},minecraft:item_name={text:\"" + COMPASS_NAME + " (" + label + ")\",color:\"gold\"}]";
+	}
+
+	private static String dimensionId(ServerPlayer p) {
+		if (p.level().dimension().equals(Level.NETHER)) {
+			return "minecraft:the_nether";
+		}
+		if (p.level().dimension().equals(Level.END)) {
+			return "minecraft:the_end";
+		}
+		return "minecraft:overworld";
+	}
+
+	private static String slotName(int slot) {
+		return slot < 9 ? "hotbar." + slot : "inventory." + (slot - 9);
+	}
+
+	private static boolean isImpostorCompass(ItemStack stack) {
+		return stack.is(Items.COMPASS) && stack.getHoverName().getString().startsWith(COMPASS_NAME);
+	}
+
+	private static int compassSlot(ServerPlayer p) {
+		Inventory inventory = p.getInventory();
+		for (int slot = 0; slot < 36; slot++) {
+			if (isImpostorCompass(inventory.getItem(slot))) {
+				return slot;
+			}
+		}
+		return -1;
+	}
+
+	private static boolean hasCompass(ServerPlayer p) {
+		return compassSlot(p) >= 0;
+	}
+
+	/** Puts the compass in a free main-inventory slot (then the hotbar) without a pickup sound; gives it normally if that fails. */
+	private void placeCompass(ServerPlayer p, String item) {
+		String name = p.getGameProfile().name();
+		int existing = compassSlot(p);
+		Inventory inventory = p.getInventory();
+		int slot = existing;
+		for (int s = 9; slot < 0 && s < 36; s++) {
+			if (inventory.getItem(s).isEmpty()) {
+				slot = s;
+			}
+		}
+		for (int s = 0; slot < 0 && s < 9; s++) {
+			if (inventory.getItem(s).isEmpty()) {
+				slot = s;
+			}
+		}
+		if (slot >= 0) {
+			String error = Fx.runChecked(server, "item replace entity " + name + " " + slotName(slot) + " with " + item);
+			if (error == null) {
+				return;
+			}
+			ImpostorLog.warn("Compass could not be placed silently: " + error);
+		}
+		String error = Fx.runChecked(server, "give " + name + " " + item + " 1");
+		if (error != null) {
+			ImpostorLog.warn("Compass could not be given: " + error);
+		}
+	}
+
+	/** The closest living, non-spectating player to {@code p} in the same dimension, or null. */
+	private ServerPlayer nearestOther(ServerPlayer p) {
+		List<ServerPlayer> candidates = new ArrayList<>();
+		List<double[]> points = new ArrayList<>();
+		for (ServerPlayer other : server.getPlayerList().getPlayers()) {
+			if (other == p || other.isSpectator() || !p.level().dimension().equals(other.level().dimension())) {
+				continue;
+			}
+			Optional<Member> om = state.member(other.getUUID());
+			if (om.isEmpty() || !om.get().alive()) {
+				continue;
+			}
+			candidates.add(other);
+			points.add(new double[] {other.getX(), other.getY(), other.getZ()});
+		}
+		int index = CompassPlan.nearest(p.getX(), p.getY(), p.getZ(), points);
+		return index < 0 ? null : candidates.get(index);
+	}
+
+	/** Re-aims every nearest-player compass at the closest other player. Only replaces the item when the target moved. */
+	private void refreshCompasses() {
+		for (Member m : state.members()) {
+			if (m.role() != Role.IMPOSTOR || !m.alive() || state.compassStage(m.id()) != CompassPlan.NEAREST) {
+				continue;
+			}
+			ServerPlayer p = server.getPlayerList().getPlayer(m.id());
+			if (p == null) {
+				continue;
+			}
+			int slot = compassSlot(p);
+			ServerPlayer target = nearestOther(p);
+			if (slot < 0 || target == null) {
+				continue;
+			}
+			int x = (int) Math.floor(target.getX());
+			int y = (int) Math.floor(target.getY());
+			int z = (int) Math.floor(target.getZ());
+			String key = dimensionId(p) + ":" + (x >> 1) + ":" + (z >> 1);
+			if (key.equals(lastCompassTarget.get(m.id()))) {
+				continue;
+			}
+			lastCompassTarget.put(m.id(), key);
+			String error = Fx.runChecked(server, "item replace entity " + p.getGameProfile().name() + " " + slotName(slot)
+				+ " with " + compassItem("nearest player", x, y, z, dimensionId(p)));
+			if (error != null) {
+				ImpostorLog.warn("Compass could not be updated: " + error);
+			}
+		}
 	}
 
 	private void beginRunning() {
@@ -302,6 +592,7 @@ public final class GameController {
 		scheduler.clear();
 		state.reset();
 		lastAccuse.clear();
+		clearCompassCache();
 		save();
 		Fx.run(server, "title @a clear");
 		broadcast(Component.literal("The game was cancelled.").withStyle(ChatFormatting.GRAY));

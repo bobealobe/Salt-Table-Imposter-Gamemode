@@ -69,6 +69,8 @@ public final class GameState {
 	private final Set<UUID> cleared = new LinkedHashSet<>();
 	private final Map<UUID, UUID> votes = new LinkedHashMap<>(); // accuser -> accused
 	private final Map<UUID, Integer> strikes = new HashMap<>();
+	private final Map<UUID, Integer> compass = new HashMap<>(); // impostor -> CompassPlan stage
+	private int elapsedSeconds; // seconds the game has been running (countdown not included)
 
 	public enum AccuseStatus { NOT_RUNNING, ACCUSER_OUT, TARGET_INVALID, ALREADY_KNOWN, VOTE, EXPOSED, CLEARED }
 
@@ -203,7 +205,32 @@ public final class GameState {
 		return true;
 	}
 
+	/** Seconds the game has been running. */
+	public int elapsedSeconds() {
+		return elapsedSeconds;
+	}
+
+	public void addSecond() {
+		elapsedSeconds++;
+	}
+
+	/** Jumps the clock (used by the test command to skip ahead). */
+	public void setElapsedSeconds(int seconds) {
+		elapsedSeconds = Math.max(0, seconds);
+	}
+
+	/** Where this player is in the compass sequence (CompassPlan.NONE if they have no entry). */
+	public int compassStage(UUID id) {
+		return compass.getOrDefault(id, CompassPlan.NONE);
+	}
+
+	public void setCompassStage(UUID id, int stage) {
+		compass.put(id, stage);
+	}
+
 	private void clearExtras() {
+		compass.clear();
+		elapsedSeconds = 0;
 		exposed.clear();
 		cleared.clear();
 		votes.clear();
@@ -369,6 +396,14 @@ public final class GameState {
 			p.setProperty("s." + k + ".n", e.getValue().toString());
 			k++;
 		}
+		p.setProperty("elapsed", Integer.toString(elapsedSeconds));
+		p.setProperty("compasses", Integer.toString(compass.size()));
+		int c = 0;
+		for (Map.Entry<UUID, Integer> e : compass.entrySet()) {
+			p.setProperty("c." + c + ".id", e.getKey().toString());
+			p.setProperty("c." + c + ".stage", e.getValue().toString());
+			c++;
+		}
 		try {
 			Path parent = file.getParent();
 			if (parent != null) {
@@ -432,6 +467,11 @@ public final class GameState {
 			int strikeCount = Integer.parseInt(p.getProperty("strikes", "0"));
 			for (int i = 0; i < strikeCount; i++) {
 				state.strikes.put(UUID.fromString(p.getProperty("s." + i + ".id")), Integer.parseInt(p.getProperty("s." + i + ".n")));
+			}
+			state.elapsedSeconds = Integer.parseInt(p.getProperty("elapsed", "0"));
+			int compassCount = Integer.parseInt(p.getProperty("compasses", "0"));
+			for (int i = 0; i < compassCount; i++) {
+				state.compass.put(UUID.fromString(p.getProperty("c." + i + ".id")), Integer.parseInt(p.getProperty("c." + i + ".stage")));
 			}
 		} catch (IOException | RuntimeException e) {
 			ImpostorLog.warn("Ignoring unreadable game state file " + file + ": " + e);
