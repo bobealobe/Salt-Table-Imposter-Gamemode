@@ -321,6 +321,12 @@ final class LobbyPlan {
 		Text callouts = new Text().add("CALL-OUTS", "aqua", true).nl();
 		if (r.bool("accuse")) {
 			callouts.add(r.integer("accuse_votes") + " accusations on the same person reveal their role.", "white").nl();
+			if (r.integer("accuse_cooldown_minutes") > 0) {
+				callouts.add("You can accuse once every " + r.integer("accuse_cooldown_minutes") + " minutes.", "gray").nl();
+			}
+			if (r.bool("accuse_need_close")) {
+				callouts.add("You must be within " + r.integer("accuse_range") + " blocks.", "gray").nl();
+			}
 			callouts.add("Impostor: exposed, free to attack.", "red").nl();
 			callouts.add("Innocent: cleared, ", "green");
 			callouts.add(r.bool("false_accuse_punish") ? "and every accuser is punished!" : "nothing else happens.", "white");

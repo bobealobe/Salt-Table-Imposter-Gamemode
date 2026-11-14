@@ -3,6 +3,7 @@ package com.impostorsmp;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -39,6 +40,8 @@ public final class GameController {
 	private final Scheduler scheduler = new Scheduler();
 	private final Path statePath;
 	private final Course course = new Course();
+	/** Server tick of each player's last accusation, for the cooldown. Not kept across restarts. */
+	private final Map<UUID, Integer> lastAccuse = new HashMap<>();
 
 	GameController(MinecraftServer server, Path configDir) {
 		this.server = server;
@@ -128,6 +131,7 @@ public final class GameController {
 			throw new IllegalStateException(e.getMessage());
 		}
 		save();
+		lastAccuse.clear();
 		Fx.run(server, "time set day");
 
 		if (rules.bool("apply_gamerules")) {
@@ -297,6 +301,7 @@ public final class GameController {
 	public void stop() {
 		scheduler.clear();
 		state.reset();
+		lastAccuse.clear();
 		save();
 		Fx.run(server, "title @a clear");
 		broadcast(Component.literal("The game was cancelled.").withStyle(ChatFormatting.GRAY));
@@ -373,7 +378,27 @@ public final class GameController {
 			accuser.sendSystemMessage(Component.literal("Call-outs are turned off.").withStyle(ChatFormatting.GRAY));
 			return;
 		}
+		int left = AccuseGate.secondsLeft(lastAccuse.get(accuser.getUUID()), server.getTickCount(),
+			rules.integer("accuse_cooldown_minutes"));
+		if (left > 0) {
+			accuser.sendSystemMessage(Component.literal("You can accuse again in " + AccuseGate.format(left) + ".")
+				.withStyle(ChatFormatting.GRAY));
+			return;
+		}
+		if (rules.bool("accuse_need_close")) {
+			boolean sameDimension = accuser.level().dimension().equals(target.level().dimension());
+			if (!AccuseGate.closeEnough(sameDimension, sameDimension ? accuser.distanceTo(target) : 0, rules.integer("accuse_range"))) {
+				accuser.sendSystemMessage(Component.literal("You have to be within " + rules.integer("accuse_range")
+					+ " blocks of somebody to accuse them.").withStyle(ChatFormatting.GRAY));
+				return;
+			}
+		}
 		AccuseResult r = state.accuse(accuser.getUUID(), target.getUUID(), rules.integer("accuse_votes"));
+		switch (r.status()) {
+			case VOTE, EXPOSED, CLEARED -> lastAccuse.put(accuser.getUUID(), server.getTickCount());
+			default -> {
+			}
+		}
 		String accuserName = accuser.getGameProfile().name();
 		String targetName = target.getGameProfile().name();
 		switch (r.status()) {
