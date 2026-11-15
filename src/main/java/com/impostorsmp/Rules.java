@@ -68,7 +68,9 @@ public final class Rules {
 		integer("spread_min_distance", 500, 0, 100000, "Minimum distance between players after spreading."),
 		integer("lobby_y", 250, 64, 300, "Height of the sky lobby made by /imp lobby."),
 		integer("spread_group_size", 1, 1, 6, "Players spawn in groups of this size (1 = everybody alone, 2 = pairs). Teammates land on the same spot."),
-		bool("spread_split_impostors", true, "Never put two impostors in the same spawn group, so they don't find each other at the start.")
+		bool("spread_split_impostors", true, "Never put two impostors in the same spawn group, so they don't find each other at the start."),
+		bool("nether_structures", true, "Place a Nether fortress and bastion when the game starts."),
+		integer("nether_structure_distance", 100, 1, 1000, "Distance along each axis from the origin (x:0, z:0) in the nether for placed structures.")
 	);
 
 	private static Def bool(String name, boolean def, String description) {
