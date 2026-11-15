@@ -496,10 +496,10 @@ public final class GameController {
 
 	/** An entity went away. If it was a marked egg, it just landed: dig the pit. */
 	public void onEntityUnload(Entity entity, ServerLevel level) {
-		if (entity.getType() != EntityType.EGG) {
-			return;
-		}
-		Set<String> tags = entity.getTags();
+    if (!entity.getType().toString().equals("minecraft:egg")) {
+        return;
+    }
+    Set<String> tags = entity.entityTags();
 		boolean porta = tags.contains("impostorsmp_portapit");
 		if (!porta && !tags.contains("impostorsmp_voidegg")) {
 			return;
