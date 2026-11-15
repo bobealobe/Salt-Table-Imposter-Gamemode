@@ -290,7 +290,7 @@ final class Secret {
 
 	/**
 	 * Same, but a summoned warden starts out angry at the given players ({@code angerTargets} are uuidTag
-	 * strings). Without that it has nobody to hunt, so it just digs back down into the ground and is gone.
+	 * strings), and cannot dig back down for 5 minutes. Without that it has nobody to hunt and just digs into the ground.
 	 */
 	static List<String> summonCommands(Mob mob, Random random, List<String> angerTargets) {
 		List<String> out = new ArrayList<>();
@@ -299,7 +299,9 @@ final class Secret {
 			case RAVAGER -> out.add("summon minecraft:ravager ~ ~ ~ {PersistenceRequired:1b}");
 			case WITHER -> out.add("summon minecraft:wither ~ ~ ~ {Invul:100}");
 			case WARDEN -> {
-				StringBuilder nbt = new StringBuilder("{PersistenceRequired:1b");
+				// dig_cooldown is the memory that stops a warden from digging back into the ground. A command-summoned
+				// warden does not have it, so it digs down almost at once; 6000 ticks keeps it above ground for 5 minutes.
+				StringBuilder nbt = new StringBuilder("{PersistenceRequired:1b,Brain:{memories:{\"minecraft:dig_cooldown\":{value:{},ttl:6000L}}}");
 				if (!angerTargets.isEmpty()) {
 					nbt.append(",anger:{suspects:[");
 					for (int i = 0; i < angerTargets.size(); i++) {
