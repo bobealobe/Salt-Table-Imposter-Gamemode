@@ -1,0 +1,41 @@
+# Gradle and Fabric Loom caches and build output
+.gradle/
+.loom-cache/
+build/
+out/
+bin/
+*.class
+
+# Local Minecraft development instances (worlds, logs, configs, and mods)
+/run/
+/runClient/
+/runServer/
+/runs/
+logs/
+crash-reports/
+*.log
+
+# IDE-generated project files and local settings
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+.nb-gradle/
+
+# OS metadata and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+
+# JVM crash and heap dumps
+hs_err_pid*
+replay_pid*
+*.hprof

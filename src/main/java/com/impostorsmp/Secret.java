@@ -27,8 +27,8 @@ final class Secret {
 
 	// Mahoraga Horn weights: ravager 50, wither 20, warden 20 (they add up to 90, so they are used as weights).
 	static final int MAHORAGA_RAVAGER = 50;
-	static final int MAHORAGA_WITHER = 20;
-	static final int MAHORAGA_WARDEN = 20;
+	static final int MAHORAGA_WITHER = 25;
+	static final int MAHORAGA_WARDEN = 25;
 
 	static final String SWORD = "minecraft:wooden_sword[minecraft:enchantments={\"minecraft:knockback\":2}]";
 
@@ -248,11 +248,12 @@ final class Secret {
 
 	/** Mahoraga Horn: ravager, wither or warden by weight. */
 	static Mob mahoragaRoll(Random random) {
+
 		int roll = random.nextInt(MAHORAGA_RAVAGER + MAHORAGA_WITHER + MAHORAGA_WARDEN);
-		if (roll < MAHORAGA_RAVAGER) {
+		if (roll < MAHORAGA_RAVAGER) { // Between 0 and 50 spawn ravenger
 			return Mob.RAVAGER;
 		}
-		return roll < MAHORAGA_RAVAGER + MAHORAGA_WITHER ? Mob.WITHER : Mob.WARDEN;
+		return roll < MAHORAGA_RAVAGER + MAHORAGA_WITHER ? Mob.WITHER : Mob.WARDEN; // from there 50/50 split between ravager and wither
 	}
 
 	/** Horde Horn: zombies, skeletons or creepers, a third each. */

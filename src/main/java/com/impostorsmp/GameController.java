@@ -43,6 +43,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.level.storage.LevelResource;
 
 /** Runs the actual game: picking roles, the countdown, deaths, win conditions. One per world that is opened. */
 public final class GameController {
@@ -71,7 +72,8 @@ public final class GameController {
 	GameController(MinecraftServer server, Path configDir) {
 		this.server = server;
 		this.rules = new Rules(configDir.resolve("impostorsmp-rules.properties"));
-		this.statePath = configDir.resolve("impostorsmp-game.properties");
+		// this.statePath = configDir.resolve("impostorsmp-game.properties");
+		this.statePath = server.getWorldPath(LevelResource.ROOT).resolve("impostersmp-game.properties");
 
 		GameState loaded = GameState.load(statePath);
 		long seed = server.overworld().getSeed();
