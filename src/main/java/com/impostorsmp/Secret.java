@@ -339,10 +339,9 @@ final class Secret {
 		return out;
 	}
 
-	/** Void Egg: a 2x2 shaft lined with crafting tables that goes all the way down to the void. */
+	/** Void Egg: a plain 2x2 shaft, with no lining, that goes all the way down to the void (so it is hard to spot). */
 	static List<String> voidCommands(String dimension, int x, int top, int z, int minY) {
 		List<String> out = new ArrayList<>();
-		out.add(fill(dimension, x - 2, minY, z - 2, x + 1, top, z + 1, "minecraft:crafting_table"));
 		out.add(fill(dimension, x - 1, minY, z - 1, x, top + 2, z, "minecraft:air"));
 		return out;
 	}
