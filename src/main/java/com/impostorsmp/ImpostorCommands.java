@@ -54,6 +54,8 @@ final class ImpostorCommands {
 			root.then(Commands.literal("compass")
 				.then(Commands.literal("player").executes(ctx -> compass(ctx.getSource(), CompassPlan.Choice.NEAREST_PLAYER)))
 				.then(Commands.literal("stronghold").executes(ctx -> compass(ctx.getSource(), CompassPlan.Choice.STRONGHOLD))));
+			root.then(Commands.literal("serum")
+				.then(Commands.literal("end").executes(ctx -> endSerum(ctx.getSource()))));
 			root.then(admin("start").executes(ctx -> start(ctx.getSource())));
 			root.then(admin("test")
 				.then(Commands.literal("impostor").executes(ctx -> startTest(ctx.getSource(), Role.IMPOSTOR)))
@@ -61,9 +63,13 @@ final class ImpostorCommands {
 				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource())))
 				.then(Commands.literal("compass").executes(ctx -> testCompass(ctx.getSource())))
 				.then(Commands.literal("secret")
-					.then(Commands.literal("vanish").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.VANISH)))
+					.then(Commands.literal("portapit").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.PORTA_PIT)))
+					.then(Commands.literal("void").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.VOID_EGG)))
+					.then(Commands.literal("snow").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.SUBZERO)))
 					.then(Commands.literal("arrow").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.ONE_SHOT)))
-					.then(Commands.literal("horn").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.HORN)))
+					.then(Commands.literal("mahoraga").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.MAHORAGA)))
+					.then(Commands.literal("horde").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.HORDE)))
+					.then(Commands.literal("serum").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.SERUM)))
 					.then(Commands.literal("lootbox").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.LOOTBOX)))));
 			root.then(admin("lobby")
 				.executes(ctx -> lobby(ctx.getSource()))
@@ -140,7 +146,7 @@ final class ImpostorCommands {
 		say(src, "/imp role - see your own role");
 		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
 		say(src, "/imp compass player|stronghold - impostors only: pick your compass once it is offered (chat buttons do the same)");
-		say(src, "Solo test (host): /imp test impostor | innocent | kit | compass (skips the clock to the compass offer) | secret vanish|arrow|horn|lootbox");
+		say(src, "Solo test (host): /imp test impostor | innocent | kit | compass (skips the clock to the compass offer) | secret portapit|void|snow|arrow|mahoraga|horde|serum|lootbox");
 		say(src, "Lobby (host): /imp lobby builds a sky lobby with a start button, /imp lobby remove takes it down");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
@@ -187,6 +193,15 @@ final class ImpostorCommands {
 			return 0;
 		}
 		game.chooseCompass(src.getPlayerOrException(), choice);
+		return 1;
+	}
+
+	private static int endSerum(CommandSourceStack src) throws CommandSyntaxException {
+		GameController game = game(src);
+		if (game == null) {
+			return 0;
+		}
+		game.endSerumEarly(src.getPlayerOrException());
 		return 1;
 	}
 

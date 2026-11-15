@@ -300,7 +300,7 @@ final class LobbyPlan {
 
 		Text know = new Text().add("GOOD TO KNOW", "aqua", true);
 		if (r.bool("impostor_kit")) {
-			know.nl().add("Impostors start with a secret trap kit.", "white");
+			know.nl().add("Impostors start with a random impostor kit.", "white");
 		}
 		know.nl().add("Traps, lava, TNT and spleefing are all fair game.", "white");
 		if (r.bool("anti_rdm")) {
@@ -345,33 +345,32 @@ final class LobbyPlan {
 		List<String> c = new ArrayList<>();
 		if (!r.bool("impostor_kit")) {
 			c.add(display(0, y + 3.5, 1, 1.5, "center", 200,
-				new Text().add("TRAP KITS ARE OFF", "red", true)));
+				new Text().add("IMPOSTOR KITS ARE OFF", "red", true)));
 			return c;
 		}
-		int builders = r.integer("impostor_kit_builders");
-
-		Text fast = new Text().add("IMPOSTOR KIT", "red", true).nl().add("QUICK TRAP (you get 1):", "yellow", true);
-		for (Kit.Entry e : Kit.FAST) {
-			fast.nl().add("- " + e.name(), "white");
-		}
-		c.add(display(-4, y + 3.5, 1, 0.9, "left", 130, fast));
-
-		Text singles = new Text().add("TRAP SLOTS (you get " + builders + "):", "yellow", true);
-		for (Kit.Entry e : Kit.SINGLES) {
-			singles.nl().add("- " + e.name(), "white");
-		}
-		singles.nl().add("The last slot may be a SET instead (" + r.integer("impostor_kit_set_chance") + "%)", "yellow");
-		c.add(display(0, y + 3.5, 1, 0.9, "left", 130, singles));
-
-		Text sets = new Text().add("READY-MADE SETS", "gold", true);
-		for (Kit.Entry e : Kit.BUNDLES) {
-			int paren = e.name().indexOf(" (");
-			sets.nl().add("- " + (paren > 0 ? e.name().substring(0, paren) : e.name()), "white", true);
-			if (paren > 0) {
-				sets.nl().add("  " + e.name().substring(paren + 2, e.name().length() - 1), "gray");
+		// Two kits per panel, and the title on the last one. Every impostor gets exactly one kit, picked at random.
+		int[][] groups = {{0, 1}, {2, 3}, {4}};
+		double[] xs = {-4, 0, 4};
+		for (int g = 0; g < groups.length; g++) {
+			Text t = new Text();
+			if (g == groups.length - 1) {
+				t.add("IMPOSTOR KITS", "red", true).nl().add("Each impostor gets one at random", "yellow").nl().nl();
 			}
+			boolean first = true;
+			for (int index : groups[g]) {
+				Kit.Entry kit = Kit.KITS.get(index);
+				if (!first) {
+					t.nl();
+				}
+				first = false;
+				t.add(kit.name(), "gold", true);
+				for (String line : kit.blurb()) {
+					t.nl().add(line, "white");
+				}
+				t.nl();
+			}
+			c.add(display(xs[g], y + 3.5, 1, 0.9, "left", 130, t));
 		}
-		c.add(display(4, y + 3.5, 1, 0.9, "left", 130, sets));
 		return c;
 	}
 

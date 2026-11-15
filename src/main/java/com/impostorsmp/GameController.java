@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -34,13 +35,15 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.BlockHitResult;
 
 /** Runs the actual game: picking roles, the countdown, deaths, win conditions. One per world that is opened. */
 public final class GameController {
@@ -55,8 +58,12 @@ public final class GameController {
 	/** The spot each nearest-player compass was last aimed at, so it is only replaced when the target moves. */
 	private final Map<UUID, String> lastCompassTarget = new HashMap<>();
 	private final Random random = new Random();
-	/** Players who are under a Vanish Cloak right now, and what was tucked away for them. */
-	private final Map<UUID, List<Stashed>> vanished = new HashMap<>();
+	/** Players under a Spectral Serum right now, and where to put them back. */
+	private final Map<UUID, SerumState> serum = new HashMap<>();
+	/** Players frozen by Sub-Zero Powder Snow, and the server tick they thaw at. */
+	private final Map<UUID, Integer> frozenUntil = new HashMap<>();
+	/** Spots where an impostor placed Sub-Zero Powder Snow ("dimension:blockpos"). */
+	private final Set<String> snowTraps = new HashSet<>();
 	private BlockPos strongholdPos;
 	private boolean strongholdSearched;
 
@@ -104,8 +111,9 @@ public final class GameController {
 		if (rules.bool("secret_item")) {
 			oneShotArrows();
 		}
-		if (!vanished.isEmpty()) {
-			tickVanish();
+		if (!serum.isEmpty() || !frozenUntil.isEmpty() || !snowTraps.isEmpty()) {
+			tickSerum();
+			tickSnowTraps();
 		}
 		if (state.phase() == Phase.RUNNING) {
 			int tick = server.getTickCount();
@@ -286,49 +294,20 @@ public final class GameController {
 	}
 
 	/**
-	 * Hands the impostor a random trap kit and tells them what is in it (only they see the message).
+	 * Hands the impostor one random impostor kit and tells them what is in it (only they see the message).
 	 * The items go into empty slots of the main inventory, never the hotbar, so nothing is held in their hand
 	 * where a spawn partner could see it, and they are placed silently (the give command plays a pickup sound
 	 * that nearby players can hear).
 	 */
 	public void giveKit(ServerPlayer player) {
-		String name = player.getGameProfile().name();
-		Inventory inventory = player.getInventory();
-		List<Integer> free = new ArrayList<>();
-		for (int slot = 9; slot < 36; slot++) { // 9..35 is the main inventory, 0..8 the hotbar
-			if (inventory.getItem(slot).isEmpty()) {
-				free.add(slot);
+		Kit.Entry kit = Kit.roll(random);
+		player.sendSystemMessage(Component.literal("Your impostor kit: " + kit.name() + " (in your inventory, not your hotbar)")
+			.withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+		for (Kit.Item item : kit.items()) {
+			for (int count : item.stacks()) { // one command per legal stack: a stack bigger than the item allows is refused
+				placeStack(player, item.itemText(), count);
 			}
-		}
-		List<Kit.Entry> slots = Kit.roll(new Random(), rules.integer("impostor_kit_builders"),
-			rules.integer("impostor_kit_set_chance"));
-		player.sendSystemMessage(Component.literal("Your trap kit (in your inventory, not your hotbar):").withStyle(ChatFormatting.GOLD));
-		for (int n = 0; n < slots.size(); n++) {
-			Kit.Entry slot = slots.get(n);
-			for (Kit.Item item : slot.items()) {
-				for (int count : item.stacks()) { // one command per legal stack: a stack bigger than the item allows is refused
-					boolean placed = false;
-					if (!free.isEmpty()) {
-						int index = free.get(0) - 9;
-						String error = Fx.runChecked(server, "item replace entity " + name + " inventory." + index + " with " + item.id() + " " + count);
-						if (error == null) {
-							free.remove(0);
-							placed = true;
-						} else {
-							ImpostorLog.warn("Kit item " + item.id() + " x" + count + " could not be placed silently: " + error);
-						}
-					}
-					if (!placed) {
-						// The inventory is full, or the quiet way failed: give it normally so the item is never lost.
-						String error = Fx.runChecked(server, "give " + name + " " + item.id() + " " + count);
-						if (error != null) {
-							ImpostorLog.warn("Kit item " + item.id() + " x" + count + " could not be given: " + error);
-						}
-					}
-				}
-			}
-			String label = n == 0 ? "Quick trap" : "Trap slot " + n;
-			player.sendSystemMessage(Component.literal(" - " + label + ": " + slot.name()).withStyle(ChatFormatting.GOLD));
+			player.sendSystemMessage(Component.literal(" - " + Kit.label(item)).withStyle(ChatFormatting.GOLD));
 		}
 		player.sendSystemMessage(Component.literal("Keep it out of your hands while others are watching.").withStyle(ChatFormatting.GRAY));
 		if (rules.bool("compass")) {
@@ -338,9 +317,37 @@ public final class GameController {
 		rollSecret(player);
 	}
 
+	/** Puts one stack in the first free main-inventory slot without a pickup sound; gives it normally if that fails. */
+	private void placeStack(ServerPlayer player, String item, int count) {
+		String name = player.getGameProfile().name();
+		Inventory inventory = player.getInventory();
+		for (int slot = 9; slot < 36; slot++) { // 9..35 is the main inventory, 0..8 the hotbar
+			if (inventory.getItem(slot).isEmpty()) {
+				String error = Fx.runChecked(server, "item replace entity " + name + " inventory." + (slot - 9) + " with " + item + " " + count);
+				if (error == null) {
+					return;
+				}
+				ImpostorLog.warn("Kit item " + item + " x" + count + " could not be placed silently: " + error);
+				break;
+			}
+		}
+		// The inventory is full, or the quiet way failed: give it normally so the item is never lost.
+		String error = Fx.runChecked(server, "give " + name + " " + item + " " + count);
+		if (error != null) {
+			ImpostorLog.warn("Kit item " + item + " x" + count + " could not be given: " + error);
+		}
+	}
+
 	// ------------------------------------------------------------------ secret items
 
-	private record Stashed(EquipmentSlot slot, int hotbar, int mainIndex, ItemStack stack) {
+	private record SerumState(String dimension, double x, double y, double z, int untilTick) {
+	}
+
+	private static final String FREEZE_MODIFIER = "impostorsmp:freeze";
+
+	private Secret.Settings secretSettings() {
+		return new Secret.Settings(rules.integer("secret_freeze_seconds"), rules.integer("secret_serum_seconds"),
+			rules.integer("secret_pit_depth"), rules.integer("secret_horde_range"));
 	}
 
 	/** Decides, once per impostor, whether they get a secret item, and tells them (the item itself comes later). */
@@ -391,10 +398,14 @@ public final class GameController {
 	private void deliverSecret(ServerPlayer p, Secret.Kind kind) {
 		state.markSecretGiven(p.getUUID());
 		save();
-		placeItem(p, Secret.itemText(kind));
+		Secret.Settings settings = secretSettings();
+		for (String item : Secret.itemTexts(kind, settings)) {
+			placeItem(p, item);
+		}
 		p.sendSystemMessage(Component.literal("SECRET ITEM: " + Secret.name(kind) + " (in your inventory)")
 			.withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD));
-		p.sendSystemMessage(Component.literal(Secret.howToUse(kind, rules.integer("secret_vanish_seconds"))).withStyle(ChatFormatting.GRAY));
+		p.sendSystemMessage(Component.literal(Secret.howToUse(kind, settings)).withStyle(ChatFormatting.GRAY));
+		p.sendSystemMessage(Component.literal("Hover over the item for the details.").withStyle(ChatFormatting.DARK_GRAY));
 		Fx.sound(server, p.getGameProfile().name(), "minecraft:entity.experience_orb.pickup", 0.5, 0.8);
 	}
 
@@ -431,7 +442,7 @@ public final class GameController {
 		}
 	}
 
-	/** Right-click with a secret item. Returns SUCCESS when the item was used up, PASS to let Minecraft carry on. */
+	/** Right-click with a secret item. Returns SUCCESS when the item was used, FAIL when it can't be used right now, PASS to let Minecraft carry on. */
 	public InteractionResult onUseItem(Player player, InteractionHand hand) {
 		if (!(player instanceof ServerPlayer p) || !rules.bool("secret_item")) {
 			return InteractionResult.PASS;
@@ -441,33 +452,237 @@ public final class GameController {
 			return InteractionResult.PASS;
 		}
 		Secret.Kind kind = Secret.kindForName(stack.getHoverName().getString());
-		if (kind == null || kind == Secret.Kind.ONE_SHOT) {
-			return InteractionResult.PASS; // the arrow is used by a dispenser, not by hand
+		if (kind == null) {
+			return InteractionResult.PASS;
 		}
-		if (kind == Secret.Kind.VANISH && vanished.containsKey(p.getUUID())) {
-			p.sendSystemMessage(Component.literal("You are already vanished.").withStyle(ChatFormatting.RED), true);
-			return InteractionResult.FAIL;
-		}
-		stack.shrink(1); // first, so a cloak in the hotbar is not tucked away with the rest
 		switch (kind) {
-			case VANISH -> startVanish(p, rules.integer("secret_vanish_seconds"));
-			case HORN -> useHorn(p);
-			case LOOTBOX -> useLootbox(p);
-			default -> { }
+			case PORTA_PIT, VOID_EGG -> tagEgg(p, kind); // Minecraft throws the egg; the pit comes where it lands
+			case MAHORAGA -> {
+				stack.shrink(1);
+				useMahoraga(p);
+				return InteractionResult.SUCCESS;
+			}
+			case HORDE -> {
+				return useHorde(p, stack) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+			}
+			case SERUM -> {
+				if (serum.containsKey(p.getUUID())) {
+					return InteractionResult.FAIL;
+				}
+				stack.shrink(1);
+				startSerum(p);
+				return InteractionResult.SUCCESS;
+			}
+			case LOOTBOX -> {
+				stack.shrink(1);
+				useLootbox(p);
+				return InteractionResult.SUCCESS;
+			}
+			default -> { } // the arrow goes in a dispenser or crossbow; the snow is placed like a bucket
 		}
-		return InteractionResult.SUCCESS;
+		return InteractionResult.PASS;
 	}
 
-	private void useHorn(ServerPlayer p) {
-		Secret.Mob mob = Secret.hornRoll(random);
-		ServerPlayer target = rules.bool("secret_horn_on_nearest") ? nearestOther(p) : null;
-		String at = (target != null ? target : p).getGameProfile().name();
+	// ---- eggs
+
+	/** Marks the egg that was just thrown, so we know it when it lands. */
+	private void tagEgg(ServerPlayer p, Secret.Kind kind) {
+		String tag = kind == Secret.Kind.PORTA_PIT ? "impostorsmp_portapit" : "impostorsmp_voidegg";
+		String name = p.getGameProfile().name();
+		scheduler.after(1, () -> Fx.run(server, "execute at " + name
+			+ " as @e[type=minecraft:egg,distance=..6,limit=1,sort=nearest,tag=!impostorsmp_portapit,tag=!impostorsmp_voidegg]"
+			+ " run tag @s add " + tag));
+	}
+
+	/** An entity went away. If it was a marked egg, it just landed: dig the pit. */
+	public void onEntityUnload(Entity entity, ServerLevel level) {
+		if (entity.getType() != EntityType.EGG) {
+			return;
+		}
+		Set<String> tags = entity.getTags();
+		boolean porta = tags.contains("impostorsmp_portapit");
+		if (!porta && !tags.contains("impostorsmp_voidegg")) {
+			return;
+		}
+		String dimension = dimensionId(level);
+		int minY = dimension.equals("minecraft:overworld") ? -64 : 0;
+		int x = (int) Math.floor(entity.getX());
+		int top = (int) Math.floor(entity.getY() - 0.5); // the block the egg landed on
+		int z = (int) Math.floor(entity.getZ());
+		List<String> commands = porta
+			? Secret.pitCommands(dimension, x, top, z, rules.integer("secret_pit_depth"), minY)
+			: Secret.voidCommands(dimension, x, top, z, minY);
+		scheduler.after(1, () -> {
+			for (String command : commands) {
+				String error = Fx.runChecked(server, command);
+				if (error != null) {
+					ImpostorLog.warn("Egg pit command failed: " + error);
+				}
+			}
+		});
+	}
+
+	// ---- Sub-Zero Powder Snow
+
+	private static String trapKey(Level level, BlockPos pos) {
+		return dimensionId(level) + ":" + pos.asLong();
+	}
+
+	/** A block was right-clicked. If it was with the special bucket, remember where the snow ends up. */
+	public InteractionResult onUseBlock(Player player, InteractionHand hand, BlockHitResult hit) {
+		if (!(player instanceof ServerPlayer p) || !rules.bool("secret_item")) {
+			return InteractionResult.PASS;
+		}
+		ItemStack stack = p.getItemInHand(hand);
+		if (stack.isEmpty() || !Secret.name(Secret.Kind.SUBZERO).equals(stack.getHoverName().getString())) {
+			return InteractionResult.PASS;
+		}
+		Level level = p.level();
+		BlockPos clicked = hit.getBlockPos();
+		BlockPos beside = clicked.relative(hit.getDirection());
+		boolean clickedWasSnow = level.getBlockState(clicked).is(Blocks.POWDER_SNOW);
+		boolean besideWasSnow = level.getBlockState(beside).is(Blocks.POWDER_SNOW);
+		scheduler.after(2, () -> {
+			if (!clickedWasSnow && level.getBlockState(clicked).is(Blocks.POWDER_SNOW)) {
+				snowTraps.add(trapKey(level, clicked));
+			}
+			if (!besideWasSnow && level.getBlockState(beside).is(Blocks.POWDER_SNOW)) {
+				snowTraps.add(trapKey(level, beside));
+			}
+		});
+		return InteractionResult.PASS;
+	}
+
+	/** Freezes whoever touches a marked powder snow block, and thaws people when their time is up. */
+	private void tickSnowTraps() {
+		int tick = server.getTickCount();
+		for (Iterator<Map.Entry<UUID, Integer>> it = frozenUntil.entrySet().iterator(); it.hasNext();) {
+			Map.Entry<UUID, Integer> entry = it.next();
+			if (tick >= entry.getValue()) {
+				it.remove();
+				thaw(entry.getKey());
+			}
+		}
+		if (snowTraps.isEmpty()) {
+			return;
+		}
+		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+			if (p.isSpectator() || frozenUntil.containsKey(p.getUUID())) {
+				continue;
+			}
+			BlockPos feet = p.blockPosition();
+			for (BlockPos pos : new BlockPos[] {feet, feet.above()}) {
+				String key = trapKey(p.level(), pos);
+				if (!snowTraps.contains(key)) {
+					continue;
+				}
+				snowTraps.remove(key);
+				if (p.level().getBlockState(pos).is(Blocks.POWDER_SNOW)) {
+					freeze(p, pos);
+					break;
+				}
+			}
+		}
+	}
+
+	private void freeze(ServerPlayer p, BlockPos pos) {
+		String name = p.getGameProfile().name();
+		int seconds = rules.integer("secret_freeze_seconds");
+		frozenUntil.put(p.getUUID(), server.getTickCount() + seconds * 20);
+		// Slowness 255 stops walking; a jump strength of zero stops jumping (slowness alone doesn't).
+		Fx.run(server, "effect give " + name + " minecraft:slowness " + seconds + " 255 false");
+		Fx.run(server, "attribute " + name + " minecraft:jump_strength modifier remove " + FREEZE_MODIFIER);
+		Fx.run(server, "attribute " + name + " minecraft:jump_strength modifier add " + FREEZE_MODIFIER + " -1 add_multiplied_total");
+		Fx.run(server, "execute in " + dimensionId(p.level()) + " run setblock " + pos.getX() + " " + pos.getY() + " " + pos.getZ() + " minecraft:air");
+		Fx.sound(server, name, "minecraft:block.glass.break", 1.0, 0.6);
+		p.sendSystemMessage(Component.literal("You are frozen solid for " + seconds + " seconds!").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), true);
+		p.sendSystemMessage(Component.literal("You are frozen solid for " + seconds + " seconds!").withStyle(ChatFormatting.AQUA));
+	}
+
+	private void thaw(UUID id) {
+		ServerPlayer p = server.getPlayerList().getPlayer(id);
+		if (p == null) {
+			return; // the modifier is removed when they rejoin
+		}
+		String name = p.getGameProfile().name();
+		Fx.run(server, "attribute " + name + " minecraft:jump_strength modifier remove " + FREEZE_MODIFIER);
+		Fx.run(server, "effect clear " + name + " minecraft:slowness");
+		p.sendSystemMessage(Component.literal("You thawed out.").withStyle(ChatFormatting.AQUA));
+	}
+
+	// ---- horns
+
+	/** Mahoraga Horn: a ravager, wither or warden on top of the user. A wither arms every innocent with a bow. */
+	private void useMahoraga(ServerPlayer p) {
+		Secret.Mob mob = Secret.mahoragaRoll(random);
+		String at = p.getGameProfile().name();
 		for (String command : Secret.summonCommands(mob, random)) {
 			Fx.run(server, "execute at " + at + " run " + command);
 		}
-		p.sendSystemMessage(Component.literal("The horn answers: " + Secret.mobLabel(mob)
-			+ (target != null ? " appears around the nearest player." : " appears around you.")).withStyle(ChatFormatting.GOLD));
+		p.sendSystemMessage(Component.literal("The horn answers: " + Secret.mobLabel(mob) + " appears on top of you!")
+			.withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+		if (mob == Secret.Mob.WITHER) {
+			for (Member m : state.members()) {
+				ServerPlayer other = server.getPlayerList().getPlayer(m.id());
+				if (other == null || m.role() != Role.INNOCENT || !m.alive()) {
+					continue;
+				}
+				String name = other.getGameProfile().name();
+				Fx.run(server, "give " + name + " minecraft:bow 1");
+				Fx.run(server, "give " + name + " minecraft:arrow 64");
+				other.sendSystemMessage(Component.literal("A WITHER has been summoned! You were given a bow and arrows.")
+					.withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+			}
+		}
 	}
+
+	/** Horde Horn: three uses, each at the closest innocent, who must be close. Returns false if nobody was close enough. */
+	private boolean useHorde(ServerPlayer p, ItemStack stack) {
+		int range = rules.integer("secret_horde_range");
+		ServerPlayer target = nearestInnocent(p, range);
+		if (target == null) {
+			p.sendSystemMessage(Component.literal("No innocent is within " + range + " blocks. The horn stays silent.")
+				.withStyle(ChatFormatting.RED), true);
+			return false;
+		}
+		Secret.Mob mob = Secret.hordeRoll(random);
+		String at = target.getGameProfile().name();
+		for (String command : Secret.summonCommands(mob, random)) {
+			Fx.run(server, "execute at " + at + " run " + command);
+		}
+		int used = stack.getDamageValue() + 1;
+		if (used >= stack.getMaxDamage()) {
+			stack.shrink(1);
+		} else {
+			stack.setDamageValue(used);
+		}
+		p.sendSystemMessage(Component.literal("The horde rises around the closest innocent: " + Secret.mobLabel(mob) + ".")
+			.withStyle(ChatFormatting.DARK_GREEN));
+		return true;
+	}
+
+	/** The closest living innocent within {@code range} blocks, in the same dimension, or null. */
+	private ServerPlayer nearestInnocent(ServerPlayer p, int range) {
+		ServerPlayer best = null;
+		double bestDistance = range;
+		for (ServerPlayer other : server.getPlayerList().getPlayers()) {
+			if (other == p || other.isSpectator() || !p.level().dimension().equals(other.level().dimension())) {
+				continue;
+			}
+			Optional<Member> om = state.member(other.getUUID());
+			if (om.isEmpty() || !om.get().alive() || om.get().role() != Role.INNOCENT) {
+				continue;
+			}
+			double distance = p.distanceTo(other);
+			if (distance <= bestDistance) {
+				bestDistance = distance;
+				best = other;
+			}
+		}
+		return best;
+	}
+
+	// ---- Lootbox
 
 	private void useLootbox(ServerPlayer p) {
 		String[] label = new String[1];
@@ -481,135 +696,75 @@ public final class GameController {
 		p.sendSystemMessage(Component.literal("Lootbox: " + label[0] + "!").withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
 	}
 
-	private static int freeMainSlot(Inventory inventory) {
-		for (int s = 9; s < 36; s++) {
-			if (inventory.getItem(s).isEmpty()) {
-				return s;
-			}
-		}
-		return -1;
+	// ---- Spectral Serum
+
+	/** True while this player is a spectator because of the serum (they are not "dead"). */
+	boolean inSerum(UUID id) {
+		return serum.containsKey(id);
 	}
 
-	/**
-	 * Vanish: invisibility with no particles and no nametag, and armor, offhand and hotbar tucked into the
-	 * main inventory (a worn armor piece or a held item stays visible even on an invisible player). Nothing is
-	 * ever deleted: if something can't be hidden because the inventory is full, it just stays where it is.
-	 */
-	private void startVanish(ServerPlayer p, int seconds) {
-		UUID id = p.getUUID();
-		String name = p.getGameProfile().name();
-		Inventory inventory = p.getInventory();
-		List<Stashed> stash = new ArrayList<>();
-		int visible = 0;
-		for (EquipmentSlot slot : new EquipmentSlot[] {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
-			EquipmentSlot.FEET, EquipmentSlot.OFFHAND}) {
-			ItemStack worn = p.getItemBySlot(slot);
-			if (worn.isEmpty()) {
-				continue;
-			}
-			int free = freeMainSlot(inventory);
-			if (free < 0) {
-				visible++;
-				continue;
-			}
-			inventory.setItem(free, worn);
-			p.setItemSlot(slot, ItemStack.EMPTY);
-			stash.add(new Stashed(slot, -1, free, worn));
-		}
-		for (int h = 0; h < 9; h++) {
-			ItemStack held = inventory.getItem(h);
-			if (held.isEmpty()) {
-				continue;
-			}
-			int free = freeMainSlot(inventory);
-			if (free < 0) {
-				visible++;
-				continue;
-			}
-			inventory.setItem(free, held);
-			inventory.setItem(h, ItemStack.EMPTY);
-			stash.add(new Stashed(null, h, free, held));
-		}
-		vanished.put(id, stash);
-		Fx.run(server, "team add impostorsmp_vanish");
-		Fx.run(server, "team modify impostorsmp_vanish nametagVisibility never");
-		Fx.run(server, "team join impostorsmp_vanish " + name);
-		Fx.run(server, "effect give " + name + " minecraft:invisibility " + seconds + " 0 true");
-		p.sendSystemMessage(Component.literal("You vanish for " + seconds + " seconds. Your hotbar and armor are in your inventory."
-			+ (visible > 0 ? " Your inventory was too full to hide " + visible + " item(s)." : "")).withStyle(ChatFormatting.DARK_PURPLE));
-		scheduler.after(seconds * 20L, () -> endVanish(id));
+	private void startSerum(ServerPlayer p) {
+		int seconds = rules.integer("secret_serum_seconds");
+		serum.put(p.getUUID(), new SerumState(dimensionId(p.level()), p.getX(), p.getY(), p.getZ(),
+			server.getTickCount() + seconds * 20));
+		Fx.run(server, "gamemode spectator " + p.getGameProfile().name());
+		p.sendSystemMessage(Component.literal("Spectral Serum: you are a spectator for " + seconds + " seconds. ")
+			.withStyle(ChatFormatting.LIGHT_PURPLE)
+			.append(chatButton("End early", ChatFormatting.GREEN, "imp serum end", "Go back to where you drank it right now.")));
 	}
 
-	/** While vanished, anything that ends up in the hotbar or offhand is tucked away again. */
-	private void tickVanish() {
-		for (UUID id : vanished.keySet()) {
-			ServerPlayer p = server.getPlayerList().getPlayer(id);
-			if (p == null) {
-				continue;
-			}
-			Inventory inventory = p.getInventory();
-			for (int h = 0; h < 9; h++) {
-				ItemStack held = inventory.getItem(h);
-				int free = held.isEmpty() ? -1 : freeMainSlot(inventory);
-				if (free >= 0) {
-					inventory.setItem(free, held);
-					inventory.setItem(h, ItemStack.EMPTY);
-				}
-			}
-			ItemStack off = p.getItemBySlot(EquipmentSlot.OFFHAND);
-			int free = off.isEmpty() ? -1 : freeMainSlot(inventory);
-			if (free >= 0) {
-				inventory.setItem(free, off);
-				p.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+	/** The player clicked [End early] (or typed /imp serum end). */
+	public void endSerumEarly(ServerPlayer p) {
+		if (serum.containsKey(p.getUUID())) {
+			endSerum(p.getUUID());
+		} else {
+			p.sendSystemMessage(Component.literal("You are not under the serum.").withStyle(ChatFormatting.RED));
+		}
+	}
+
+	private void tickSerum() {
+		int tick = server.getTickCount();
+		for (UUID id : new ArrayList<>(serum.keySet())) {
+			if (tick >= serum.get(id).untilTick()) {
+				endSerum(id);
 			}
 		}
 	}
 
-	private void endVanish(UUID id) {
-		List<Stashed> stash = vanished.remove(id);
-		if (stash == null) {
-			return;
-		}
+	private void endSerum(UUID id) {
+		SerumState saved = serum.remove(id);
 		ServerPlayer p = server.getPlayerList().getPlayer(id);
-		if (p == null) {
-			return; // offline: everything is still safe in their inventory
-		}
-		Inventory inventory = p.getInventory();
-		for (Stashed part : stash) {
-			if (inventory.getItem(part.mainIndex()) != part.stack()) {
-				continue; // they moved it themselves; leave it alone
-			}
-			if (part.slot() != null) {
-				if (p.getItemBySlot(part.slot()).isEmpty()) {
-					p.setItemSlot(part.slot(), part.stack());
-					inventory.setItem(part.mainIndex(), ItemStack.EMPTY);
-				}
-			} else if (inventory.getItem(part.hotbar()).isEmpty()) {
-				inventory.setItem(part.hotbar(), part.stack());
-				inventory.setItem(part.mainIndex(), ItemStack.EMPTY);
-			}
+		if (saved == null || p == null) {
+			return; // offline: they are put back in survival when they rejoin
 		}
 		String name = p.getGameProfile().name();
-		Fx.run(server, "effect clear " + name + " minecraft:invisibility");
-		Fx.run(server, "team leave " + name);
-		p.sendSystemMessage(Component.literal("You are visible again.").withStyle(ChatFormatting.DARK_PURPLE));
+		Fx.run(server, "gamemode survival " + name);
+		Fx.run(server, String.format(Locale.ROOT, "execute in %s run tp %s %.2f %.2f %.2f", saved.dimension(), name,
+			saved.x(), saved.y(), saved.z()));
+		p.sendSystemMessage(Component.literal("The serum wears off. You are back where you drank it.").withStyle(ChatFormatting.LIGHT_PURPLE));
 	}
 
-	private void endAllVanish() {
-		for (UUID id : new ArrayList<>(vanished.keySet())) {
-			endVanish(id);
+	/** Ends every serum and freeze (the game stopped or finished). */
+	private void endAllSecretEffects() {
+		for (UUID id : new ArrayList<>(serum.keySet())) {
+			endSerum(id);
 		}
+		for (UUID id : new ArrayList<>(frozenUntil.keySet())) {
+			frozenUntil.remove(id);
+			thaw(id);
+		}
+		snowTraps.clear();
 	}
 
 	/**
-	 * One Shot One Kill: an arrow with that name that comes out of a DISPENSER gets absurd damage and can't be
-	 * picked up. Arrows from a bow or crossbow carry a "weapon" tag and are left alone. Each arrow is looked at once.
+	 * One Shot One Kill: an arrow with that name that comes out of a DISPENSER or a CROSSBOW gets absurd damage
+	 * and can't be picked up. Arrows from a bow are left alone. Each arrow is looked at once.
 	 */
 	private void oneShotArrows() {
 		String seen = "tag=!impostorsmp_seen";
 		String oneShot = "@e[type=minecraft:arrow," + seen
 			+ ",nbt={item:{components:{\"minecraft:custom_data\":{impostorsmp:\"one_shot\"}}}}]";
-		Fx.run(server, "execute as @e[type=minecraft:arrow," + seen + ",nbt={weapon:{}}] run tag @s add impostorsmp_seen");
+		Fx.run(server, "execute as @e[type=minecraft:arrow," + seen + ",nbt={weapon:{id:\"minecraft:bow\"}}] run tag @s add impostorsmp_seen");
 		Fx.run(server, "execute as " + oneShot + " run data modify entity @s damage set value 1000.0d");
 		Fx.run(server, "execute as " + oneShot + " run data modify entity @s pickup set value 0b");
 		Fx.run(server, "execute as @e[type=minecraft:arrow," + seen + "] run tag @s add impostorsmp_seen");
@@ -618,6 +773,11 @@ public final class GameController {
 	// ------------------------------------------------------------------ impostor compasses
 
 	private static final String COMPASS_NAME = "Impostor Compass";
+
+	/** Minutes between the offer and the stronghold compass; 0 when that wait is switched off. */
+	private int compassWait() {
+		return rules.bool("compass_stronghold_wait") ? rules.integer("compass_wait_minutes") : 0;
+	}
 
 	private void clearCompassCache() {
 		lastCompassTarget.clear();
@@ -629,7 +789,7 @@ public final class GameController {
 	private void compassSecond() {
 		int elapsed = state.elapsedSeconds();
 		int offer = rules.integer("compass_minutes");
-		int wait = rules.integer("compass_wait_minutes");
+		int wait = compassWait();
 		for (Member m : state.members()) {
 			if (m.role() != Role.IMPOSTOR || !m.alive()) {
 				continue;
@@ -652,14 +812,15 @@ public final class GameController {
 	}
 
 	private void sendCompassOffer(ServerPlayer p) {
-		int wait = rules.integer("compass_wait_minutes");
+		int wait = compassWait();
 		p.sendSystemMessage(Component.literal("Your impostor compass is ready. Pick ONE:").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
 		MutableComponent line = Component.literal("  ")
 			.append(chatButton("Nearest player", ChatFormatting.GREEN, "imp compass player",
 				"Points at the closest other player. Yours right now."))
 			.append(Component.literal("   "))
 			.append(chatButton("Stronghold", ChatFormatting.AQUA, "imp compass stronghold",
-				"Points at the stronghold. Arrives " + wait + " minutes after the offer."));
+				wait > 0 ? "Points at the stronghold. Arrives " + wait + " minutes after the offer."
+					: "Points at the stronghold. Yours right now."));
 		p.sendSystemMessage(line);
 	}
 
@@ -681,7 +842,7 @@ public final class GameController {
 			return;
 		}
 		int offer = rules.integer("compass_minutes");
-		int wait = rules.integer("compass_wait_minutes");
+		int wait = compassWait();
 		int stage = state.compassStage(p.getUUID());
 		switch (CompassPlan.choose(stage, choice, state.elapsedSeconds(), offer, wait)) {
 			case NOT_YET -> p.sendSystemMessage(Component.literal("Not yet. The compass unlocks after " + offer + " minutes.").withStyle(ChatFormatting.RED));
@@ -729,7 +890,7 @@ public final class GameController {
 		int x = (int) Math.floor(target != null ? target.getX() : p.getX());
 		int y = (int) Math.floor(target != null ? target.getY() : p.getY());
 		int z = (int) Math.floor(target != null ? target.getZ() : p.getZ());
-		placeCompass(p, compassItem("nearest player", x, y, z, dimensionId(p)));
+		placeCompass(p, compassItem("nearest player", x, y, z, dimensionId(p.level())));
 		lastCompassTarget.remove(p.getUUID());
 		p.sendSystemMessage(Component.literal(target != null
 			? "Nearest-player compass added to your inventory. It updates every few seconds."
@@ -764,11 +925,11 @@ public final class GameController {
 			+ dimension + "\"},tracked:false},minecraft:item_name={text:\"" + COMPASS_NAME + " (" + label + ")\",color:\"gold\"}]";
 	}
 
-	private static String dimensionId(ServerPlayer p) {
-		if (p.level().dimension().equals(Level.NETHER)) {
+	private static String dimensionId(Level level) {
+		if (level.dimension().equals(Level.NETHER)) {
 			return "minecraft:the_nether";
 		}
-		if (p.level().dimension().equals(Level.END)) {
+		if (level.dimension().equals(Level.END)) {
 			return "minecraft:the_end";
 		}
 		return "minecraft:overworld";
@@ -862,13 +1023,13 @@ public final class GameController {
 			int x = (int) Math.floor(target.getX());
 			int y = (int) Math.floor(target.getY());
 			int z = (int) Math.floor(target.getZ());
-			String key = dimensionId(p) + ":" + (x >> 1) + ":" + (z >> 1);
+			String key = dimensionId(p.level()) + ":" + (x >> 1) + ":" + (z >> 1);
 			if (key.equals(lastCompassTarget.get(m.id()))) {
 				continue;
 			}
 			lastCompassTarget.put(m.id(), key);
 			String error = Fx.runChecked(server, "item replace entity " + p.getGameProfile().name() + " " + slotName(slot)
-				+ " with " + compassItem("nearest player", x, y, z, dimensionId(p)));
+				+ " with " + compassItem("nearest player", x, y, z, dimensionId(p.level())));
 			if (error != null) {
 				ImpostorLog.warn("Compass could not be updated: " + error);
 			}
@@ -883,7 +1044,7 @@ public final class GameController {
 
 	/** Cancels the current game without a winner. */
 	public void stop() {
-		endAllVanish();
+		endAllSecretEffects();
 		scheduler.clear();
 		state.reset();
 		lastAccuse.clear();
@@ -1049,7 +1210,7 @@ public final class GameController {
 	}
 
 	private void finish(Outcome outcome, String reason) {
-		endAllVanish();
+		endAllSecretEffects();
 		state.finish(outcome);
 		save();
 
@@ -1079,6 +1240,17 @@ public final class GameController {
 
 	/** Called when somebody joins or respawns: dead players (and late joiners during a game) become spectators. */
 	void onPlayerReady(ServerPlayer player) {
+		if (rules.bool("secret_item")) {
+			UUID id = player.getUUID();
+			if (!frozenUntil.containsKey(id)) {
+				// A server restart mid-freeze would otherwise leave the no-jump modifier on them for good.
+				Fx.run(server, "attribute " + player.getGameProfile().name() + " minecraft:jump_strength modifier remove " + FREEZE_MODIFIER);
+			}
+			Optional<Member> own = state.member(id);
+			if (state.phase() == Phase.RUNNING && own.isPresent() && own.get().alive() && player.isSpectator() && !serum.containsKey(id)) {
+				Fx.run(server, "gamemode survival " + player.getGameProfile().name()); // a serum that was cut short by a restart
+			}
+		}
 		int lobbyY = rules.lobbyY();
 		if (lobbyY >= 0 && state.phase() != Phase.RUNNING && state.phase() != Phase.COUNTDOWN) {
 			// Somebody joining (or respawning) while the lobby is up goes straight into it.
@@ -1291,7 +1463,7 @@ public final class GameController {
 		Component line = Component.literal("[Dead] <" + sender.getGameProfile().name() + "> " + text)
 			.withStyle(ChatFormatting.GRAY);
 		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-			if (p.isSpectator()) {
+			if (p.isSpectator() && !serum.containsKey(p.getUUID())) {
 				p.sendSystemMessage(line);
 			}
 		}

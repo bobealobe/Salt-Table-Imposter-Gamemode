@@ -5,22 +5,27 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * The trap kit an impostor starts with: one fast trap item plus a few builder slots. A builder slot is
- * either a single item or a ready-made set of items that go together. No Minecraft code in here on
- * purpose, so it can be tested on its own. Edit the lists to change the pool.
+ * The impostor kits. Every impostor gets exactly one of them at random (all equally likely). No Minecraft
+ * code in here on purpose, so it can be tested on its own. Edit KITS to change what is in them.
  */
 final class Kit {
-	record Item(String id, int count) {
+	/** One item: id, how many, and optional components in [] (enchantments and so on). */
+	record Item(String id, int count, String components) {
 		/** How many of this item fit in one inventory slot. */
 		int stackSize() {
-			return switch (id) {
-				case "minecraft:lava_bucket", "minecraft:powder_snow_bucket", "minecraft:flint_and_steel",
-					"minecraft:tnt_minecart" -> 1;
+			String name = id.substring(id.indexOf(':') + 1);
+			if (name.endsWith("_bucket") || name.endsWith("_pickaxe") || name.endsWith("_shovel") || name.endsWith("_axe")
+				|| name.endsWith("_sword") || name.endsWith("_spear") || name.endsWith("_hoe")) {
+				return 1;
+			}
+			return switch (name) {
+				case "flint_and_steel", "tnt_minecart", "bow", "crossbow", "shield", "mace" -> 1;
+				case "ender_pearl", "egg" -> 16;
 				default -> 64;
 			};
 		}
 
-		/** The item split into legal stacks, e.g. 3 TNT minecarts are three stacks of 1. */
+		/** The item split into legal stacks, e.g. 3 pufferfish buckets are three stacks of 1. */
 		List<Integer> stacks() {
 			List<Integer> out = new ArrayList<>();
 			for (int left = count; left > 0; left -= stackSize()) {
@@ -28,83 +33,57 @@ final class Kit {
 			}
 			return out;
 		}
+
+		/** The item as text for /give or /item replace (without the count). */
+		String itemText() {
+			return components.isEmpty() ? id : id + "[" + components + "]";
+		}
 	}
 
-
-	/** One slot of the kit: a name shown to the player, the items it gives, and how likely it is. */
-	record Entry(String name, List<Item> items, int weight) {
-	}
-
-	private static Entry one(String id, int count, String name, int weight) {
-		return new Entry(name, List.of(new Item("minecraft:" + id, count)), weight);
+	/** One kit: its name, the items, and a few short lines describing it (shown in the lobby). */
+	record Entry(String name, List<Item> items, List<String> blurb) {
 	}
 
 	private static Item i(String id, int count) {
-		return new Item("minecraft:" + id, count);
+		return new Item("minecraft:" + id, count, "");
 	}
 
-	static final List<Entry> FAST = List.of(
-		one("lava_bucket", 1, "Lava bucket", 1),
-		one("flint_and_steel", 1, "Flint and steel", 1),
-		one("powder_snow_bucket", 1, "Powder snow bucket", 1),
-		one("pointed_dripstone", 6, "Pointed dripstone x6", 1));
+	/** An item with enchantments, e.g. e("iron_pickaxe", "efficiency", 5). */
+	private static Item e(String id, String enchantment, int level) {
+		return new Item("minecraft:" + id, 1, "minecraft:enchantments={\"minecraft:" + enchantment + "\":" + level + "}");
+	}
 
-	static final List<Entry> SINGLES = List.of(
-		one("tnt", 6, "TNT x6", 3),
-		one("tnt_minecart", 3, "TNT minecart x3", 2),
-		one("cobweb", 16, "Cobweb x16", 3),
-		one("ender_pearl", 3, "Ender pearl x3", 2));
-
-	/** Ready-made sets. Each one has enough in it to build a trap of that kind. */
-	static final List<Entry> BUNDLES = List.of(
-		new Entry("Pitfall set (32 scaffolding, 4 observer, 4 sticky piston)",
-			List.of(i("scaffolding", 32), i("observer", 4), i("sticky_piston", 4)), 3),
-		new Entry("TNT set (5 TNT, 4 observer, 12 redstone dust)",
-			List.of(i("tnt", 5), i("observer", 4), i("redstone", 12)), 3),
-		new Entry("Web set (24 cobweb, 1 flint and steel, 3 TNT)",
-			List.of(i("cobweb", 24), i("flint_and_steel", 1), i("tnt", 3)), 2),
-		new Entry("Minecart set (3 TNT minecart, 16 rail, 4 powered rail)",
-			List.of(i("tnt_minecart", 3), i("rail", 16), i("powered_rail", 4)), 2));
+	static final List<Entry> KITS = List.of(
+		new Entry("Pitfall Kit",
+			List.of(i("scaffolding", 32), i("pointed_dripstone", 16), e("iron_pickaxe", "efficiency", 5),
+				e("iron_shovel", "efficiency", 5), e("wooden_sword", "knockback", 2)),
+			List.of("32 scaffolding, 16 dripstone", "Efficiency 5 iron pickaxe + shovel", "Knockback 2 wooden sword")),
+		new Entry("TNT Kit",
+			List.of(i("tnt", 10), i("flint_and_steel", 1), e("iron_spear", "knockback", 2)),
+			List.of("10 TNT, flint and steel", "Knockback 2 iron spear")),
+		new Entry("Full-Box Kit",
+			List.of(i("cobweb", 24), i("lava_bucket", 1), i("water_bucket", 1), i("diamond_pickaxe", 1)),
+			List.of("24 cobwebs, lava + water bucket", "Diamond pickaxe")),
+		new Entry("TNT Minecart Kit",
+			List.of(i("tnt_minecart", 6), i("rail", 16), i("powered_rail", 16), i("observer", 3)),
+			List.of("6 TNT minecarts, 16 rails", "16 powered rails, 3 observers")),
+		new Entry("Pufferfish Kit",
+			List.of(i("pufferfish_bucket", 3), i("kelp", 64), i("soul_sand", 16), e("iron_pickaxe", "efficiency", 5),
+				e("iron_shovel", "efficiency", 5), e("wooden_sword", "knockback", 2)),
+			List.of("3 pufferfish buckets, 64 kelp", "16 soul sand", "Efficiency 5 iron pickaxe + shovel,", "knockback 2 wooden sword")));
 
 	private Kit() {
 	}
 
-	/**
-	 * One fast item, then {@code builders} different builder slots. Only the last builder slot can be a
-	 * ready-made set (with a {@code bundleChance} percent chance); every slot before it is a single item.
-	 * So a kit never has more than one set.
-	 */
-	static List<Entry> roll(Random random, int builders, int bundleChance) {
-		List<Entry> result = new ArrayList<>();
-		result.add(pick(new ArrayList<>(FAST), random));
-		List<Entry> singles = new ArrayList<>(SINGLES);
-		List<Entry> bundles = new ArrayList<>(BUNDLES);
-		for (int n = 0; n < builders; n++) {
-			boolean last = n == builders - 1;
-			boolean useBundle = !bundles.isEmpty() && (singles.isEmpty() || (last && random.nextInt(100) < bundleChance));
-			List<Entry> from = useBundle ? bundles : singles;
-			if (from.isEmpty()) {
-				break;
-			}
-			result.add(pick(from, random));
-		}
-		return result;
+	/** A random kit; every kit is equally likely. */
+	static Entry roll(Random random) {
+		return KITS.get(random.nextInt(KITS.size()));
 	}
 
-	/** Picks one entry by weight and removes it from the list. */
-	private static Entry pick(List<Entry> pool, Random random) {
-		int total = 0;
-		for (Entry e : pool) {
-			total += e.weight();
-		}
-		int roll = random.nextInt(total);
-		for (Entry e : pool) {
-			roll -= e.weight();
-			if (roll < 0) {
-				pool.remove(e);
-				return e;
-			}
-		}
-		return pool.remove(0);
+	/** "32 scaffolding" or "efficiency-enchanted iron pickaxe", for the chat message. */
+	static String label(Item item) {
+		String name = item.id().substring(item.id().indexOf(':') + 1).replace('_', ' ');
+		String text = item.count() > 1 ? item.count() + " " + name : name;
+		return item.components().isEmpty() ? text : text + " (enchanted)";
 	}
 }

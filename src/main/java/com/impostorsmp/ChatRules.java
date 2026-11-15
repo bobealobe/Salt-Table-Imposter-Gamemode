@@ -18,7 +18,7 @@ final class ChatRules {
 			if (game == null || game.chatOpen()) {
 				return true;
 			}
-			if (sender.isSpectator() && game.rules().bool("dead_chat")) {
+			if (sender.isSpectator() && !game.inSerum(sender.getUUID()) && game.rules().bool("dead_chat")) {
 				game.deadChat(sender, message.signedContent());
 				return false;
 			}

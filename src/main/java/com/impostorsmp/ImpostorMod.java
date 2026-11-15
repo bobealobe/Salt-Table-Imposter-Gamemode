@@ -7,6 +7,8 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.world.InteractionResult;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -58,6 +60,18 @@ public class ImpostorMod implements ModInitializer {
 				return InteractionResult.PASS;
 			}
 			return controller.onUseItem(player, hand);
+		});
+
+		UseBlockCallback.EVENT.register((player, level, hand, hitResult) -> {
+			if (controller == null) {
+				return InteractionResult.PASS;
+			}
+			return controller.onUseBlock(player, hand, hitResult);
+		});
+		ServerEntityEvents.ENTITY_UNLOAD.register((entity, level) -> {
+			if (controller != null) {
+				controller.onEntityUnload(entity, level);
+			}
 		});
 
 		ServerPlayerEvents.JOIN.register(player -> {
