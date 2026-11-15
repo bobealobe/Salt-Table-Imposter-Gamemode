@@ -280,12 +280,35 @@ final class Secret {
 	 * coordinates, so run them with "execute at ... run").
 	 */
 	static List<String> summonCommands(Mob mob, Random random) {
+		return summonCommands(mob, random, List.of());
+	}
+
+	/** A UUID as an NBT int array, e.g. [I;1,2,3,4]. */
+	static String uuidTag(long most, long least) {
+		return "[I;" + (int) (most >> 32) + "," + (int) most + "," + (int) (least >> 32) + "," + (int) least + "]";
+	}
+
+	/**
+	 * Same, but a summoned warden starts out angry at the given players ({@code angerTargets} are uuidTag
+	 * strings). Without that it has nobody to hunt, so it just digs back down into the ground and is gone.
+	 */
+	static List<String> summonCommands(Mob mob, Random random, List<String> angerTargets) {
 		List<String> out = new ArrayList<>();
 		String helmet = "head:{id:\"minecraft:iron_helmet\",count:1}";
 		switch (mob) {
 			case RAVAGER -> out.add("summon minecraft:ravager ~ ~ ~ {PersistenceRequired:1b}");
 			case WITHER -> out.add("summon minecraft:wither ~ ~ ~ {Invul:100}");
-			case WARDEN -> out.add("summon minecraft:warden ~ ~ ~ {PersistenceRequired:1b}");
+			case WARDEN -> {
+				StringBuilder nbt = new StringBuilder("{PersistenceRequired:1b");
+				if (!angerTargets.isEmpty()) {
+					nbt.append(",anger:{suspects:[");
+					for (int i = 0; i < angerTargets.size(); i++) {
+						nbt.append(i > 0 ? "," : "").append("{uuid:").append(angerTargets.get(i)).append(",anger:150}");
+					}
+					nbt.append("]}");
+				}
+				out.add("summon minecraft:warden ~ ~ ~ " + nbt + "}");
+			}
 			case ZOMBIES -> {
 				for (int i = 0; i < 8; i++) {
 					out.add("summon minecraft:zombie " + offset(random) + " ~ " + offset(random)

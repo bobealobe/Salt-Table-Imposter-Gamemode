@@ -158,6 +158,27 @@ public final class GameController {
 		start(host, role);
 	}
 
+	/**
+	 * Makes sure the Nether has a fortress and a bastion remnant near the middle, so they are inside the
+	 * border (the Nether is the overworld scaled down 8 times). Placing the same structure twice puts it in
+	 * the same spot, so running this again is harmless. The chunks around them are generated now, which can
+	 * take a few seconds.
+	 */
+	public void placeNetherStructures() {
+		int d = rules.integer("nether_structure_distance");
+		placeNetherStructure("minecraft:fortress", -d, 64, d);
+		placeNetherStructure("minecraft:bastion_remnant", d, 64, -d);
+	}
+
+	private void placeNetherStructure(String structure, int x, int y, int z) {
+		String error = Fx.runChecked(server, "execute in minecraft:the_nether run place structure " + structure + " " + x + " " + y + " " + z);
+		if (error != null) {
+			ImpostorLog.warn("Could not place " + structure + " in the Nether: " + error);
+		} else {
+			ImpostorLog.warn("Placed " + structure + " in the Nether at " + x + " " + z + ".");
+		}
+	}
+
 	private void start(ServerPlayer testHost, Role testRole) {
 		if (state.phase() == Phase.COUNTDOWN || state.phase() == Phase.RUNNING) {
 			throw new IllegalStateException("A game is already running. Use /imp stop first.");
@@ -184,6 +205,9 @@ public final class GameController {
 		lastAccuse.clear();
 		clearCompassCache();
 		Fx.run(server, "time set day");
+		if (testHost == null && rules.bool("nether_structures")) {
+			placeNetherStructures();
+		}
 
 		if (rules.bool("apply_gamerules")) {
 			applyGameRules();
@@ -616,7 +640,17 @@ public final class GameController {
 	private void useMahoraga(ServerPlayer p) {
 		Secret.Mob mob = Secret.mahoragaRoll(random);
 		String at = p.getGameProfile().name();
-		for (String command : Secret.summonCommands(mob, random)) {
+		// A warden with nobody to hunt just digs back down and vanishes, so it starts out angry at everybody
+		// close by (including the user: it is on top of them).
+		List<String> angry = new ArrayList<>();
+		if (mob == Secret.Mob.WARDEN) {
+			for (ServerPlayer other : server.getPlayerList().getPlayers()) {
+				if (!other.isSpectator() && other.level().dimension().equals(p.level().dimension()) && p.distanceTo(other) <= 64) {
+					angry.add(Secret.uuidTag(other.getUUID().getMostSignificantBits(), other.getUUID().getLeastSignificantBits()));
+				}
+			}
+		}
+		for (String command : Secret.summonCommands(mob, random, angry)) {
 			Fx.run(server, "execute at " + at + " run " + command);
 		}
 		p.sendSystemMessage(Component.literal("The horn answers: " + Secret.mobLabel(mob) + " appears on top of you!")
