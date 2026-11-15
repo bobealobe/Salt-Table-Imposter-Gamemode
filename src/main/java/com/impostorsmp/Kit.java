@@ -57,20 +57,25 @@ final class Kit {
 		new Entry("Pitfall Kit",
 			List.of(i("scaffolding", 32), i("pointed_dripstone", 16), e("iron_pickaxe", "efficiency", 5),
 				e("iron_shovel", "efficiency", 5), e("wooden_sword", "knockback", 2)),
-			List.of("32 scaffolding, 16 dripstone", "Efficiency 5 iron pickaxe + shovel", "Knockback 2 wooden sword")),
+			List.of("32 scaffolding", "16 pointed dripstone", "Efficiency 5 iron pickaxe", "Efficiency 5 iron shovel",
+				"Knockback 2 wooden sword")),
 		new Entry("TNT Kit",
 			List.of(i("tnt", 10), i("flint_and_steel", 1), e("iron_spear", "knockback", 2)),
-			List.of("10 TNT, flint and steel", "Knockback 2 iron spear")),
+			List.of("10 TNT", "Flint and steel", "Knockback 2 iron spear")),
 		new Entry("Full-Box Kit",
 			List.of(i("cobweb", 24), i("lava_bucket", 1), i("water_bucket", 1), i("diamond_pickaxe", 1)),
-			List.of("24 cobwebs, lava + water bucket", "Diamond pickaxe")),
+			List.of("24 cobwebs", "Lava bucket", "Water bucket", "Diamond pickaxe")),
 		new Entry("TNT Minecart Kit",
 			List.of(i("tnt_minecart", 6), i("rail", 16), i("powered_rail", 16), i("observer", 3)),
-			List.of("6 TNT minecarts, 16 rails", "16 powered rails, 3 observers")),
+			List.of("6 TNT minecarts", "16 rails", "16 powered rails", "3 observers")),
 		new Entry("Pufferfish Kit",
 			List.of(i("pufferfish_bucket", 3), i("kelp", 64), i("soul_sand", 16), e("iron_pickaxe", "efficiency", 5),
 				e("iron_shovel", "efficiency", 5), e("wooden_sword", "knockback", 2)),
-			List.of("3 pufferfish buckets, 64 kelp", "16 soul sand", "Efficiency 5 iron pickaxe + shovel,", "knockback 2 wooden sword")));
+			List.of("3 pufferfish buckets", "64 kelp", "16 soul sand", "Efficiency 5 iron pickaxe",
+				"Efficiency 5 iron shovel", "Knockback 2 wooden sword")),
+		new Entry("Portaler Kit",
+			List.of(i("obsidian", 60), i("flint_and_steel", 1), e("diamond_pickaxe", "efficiency", 5)),
+			List.of("60 obsidian", "Flint and steel", "Efficiency 5 diamond pickaxe")));
 
 	private Kit() {
 	}

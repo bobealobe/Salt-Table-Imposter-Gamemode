@@ -39,7 +39,7 @@ public final class Rules {
 		bool("anti_rdm_weakness", true, "Punishment also gives Weakness and Mining Fatigue."),
 		bool("anti_rdm_glowing", true, "Punishment also makes the player glow, so everybody can see them through walls."),
 		bool("anti_rdm_escalate", true, "Every repeat offence doubles the time and adds a slowness level."),
-		bool("impostor_kit", true, "Each impostor starts with one random impostor kit (Pitfall, TNT, Full-Box, TNT Minecart or Pufferfish)."),
+		bool("impostor_kit", true, "Each impostor starts with one random impostor kit (Pitfall, TNT, Full-Box, TNT Minecart, Pufferfish or Portaler)."),
 		bool("compass", true, "Impostors can pick a compass later in the game: one that points at the nearest player, or one that points at the stronghold."),
 		integer("compass_minutes", 15, 1, 120, "Minutes into the game until impostors may pick a compass."),
 		bool("compass_stronghold_wait", true, "The stronghold compass arrives compass_wait_minutes after the offer. Off = you get it the moment you choose it."),

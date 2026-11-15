@@ -35,7 +35,6 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -498,10 +497,8 @@ public final class GameController {
 
 	/** An entity went away. If it was a marked egg, it just landed: dig the pit. */
 	public void onEntityUnload(Entity entity, ServerLevel level) {
-		if (entity.getType() != EntityType.EGG) {
-			return;
-		}
-		Set<String> tags = entity.getTags();
+		// Only our marked eggs carry these tags, so no check of the entity type is needed.
+		Set<String> tags = entity.entityTags();
 		boolean porta = tags.contains("impostorsmp_portapit");
 		if (!porta && !tags.contains("impostorsmp_voidegg")) {
 			return;
@@ -514,6 +511,7 @@ public final class GameController {
 		List<String> commands = porta
 			? Secret.pitCommands(dimension, x, top, z, rules.integer("secret_pit_depth"), minY)
 			: Secret.voidCommands(dimension, x, top, z, minY);
+		ImpostorLog.warn("Egg landed: digging a " + (porta ? "Porta-Pit" : "Void") + " at " + x + " " + top + " " + z + " in " + dimension);
 		scheduler.after(1, () -> {
 			for (String command : commands) {
 				String error = Fx.runChecked(server, command);

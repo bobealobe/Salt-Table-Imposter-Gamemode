@@ -348,26 +348,26 @@ final class LobbyPlan {
 				new Text().add("IMPOSTOR KITS ARE OFF", "red", true)));
 			return c;
 		}
-		// Two kits per panel, and the title on the last one. Every impostor gets exactly one kit, picked at random.
-		int[][] groups = {{0, 1}, {2, 3}, {4}};
-		double[] xs = {-4, 0, 4};
+		// Four panels side by side: each kit is its name with its items listed underneath. Every impostor gets
+		// exactly one kit, picked at random. The title sits on the first panel.
+		int[][] groups = {{0}, {1, 2}, {3, 5}, {4}};
+		double[] xs = {-6, -2, 2, 6};
 		for (int g = 0; g < groups.length; g++) {
 			Text t = new Text();
-			if (g == groups.length - 1) {
-				t.add("IMPOSTOR KITS", "red", true).nl().add("Each impostor gets one at random", "yellow").nl().nl();
+			if (g == 0) {
+				t.add("IMPOSTOR KITS", "red", true).nl().add("You get one, at random.", "yellow").nl().nl();
 			}
 			boolean first = true;
 			for (int index : groups[g]) {
 				Kit.Entry kit = Kit.KITS.get(index);
 				if (!first) {
-					t.nl();
+					t.nl().nl();
 				}
 				first = false;
 				t.add(kit.name(), "gold", true);
 				for (String line : kit.blurb()) {
-					t.nl().add(line, "white");
+					t.nl().add("- " + line, "white");
 				}
-				t.nl();
 			}
 			c.add(display(xs[g], y + 3.5, 1, 0.9, "left", 130, t));
 		}
