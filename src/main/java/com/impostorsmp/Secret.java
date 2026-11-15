@@ -132,7 +132,8 @@ final class Secret {
 			case SERUM -> {
 				out.add("Right-click: you become a spectator for");
 				out.add(s.serumSeconds() + " seconds. Click the chat message to end");
-				out.add("it early. You return to where you drank it.");
+				out.add("it early. You stay wherever you end up (it can");
+				out.add("only end in open space, not inside blocks).");
 			}
 			case LOOTBOX -> {
 				out.add("Right-click to open. You always get diamond");
@@ -194,7 +195,7 @@ final class Secret {
 			case ONE_SHOT -> "Load it into a dispenser or a crossbow. Whoever it hits dies instantly.";
 			case MAHORAGA -> "Right-click to summon a ravager, a wither or a warden ON TOP OF YOU. Careful.";
 			case HORDE -> "Right-click within " + s.hordeRange() + " blocks of an innocent to send a horde at the closest one. 3 uses.";
-			case SERUM -> "Right-click to spectate for " + s.serumSeconds() + " seconds. You come back where you drank it.";
+			case SERUM -> "Right-click to spectate for " + s.serumSeconds() + " seconds. You stay wherever you end up, in open space.";
 			case LOOTBOX -> "Right-click to open it for diamond armor and a random loadout.";
 		};
 	}

@@ -60,6 +60,8 @@ public final class GameController {
 	private final Random random = new Random();
 	/** Players under a Spectral Serum right now, and where to put them back. */
 	private final Map<UUID, SerumState> serum = new HashMap<>();
+	/** Serum users whose time ran out while they were inside blocks (so they are only told once). */
+	private final Set<UUID> serumWarned = new HashSet<>();
 	/** Players frozen by Sub-Zero Powder Snow, and the server tick they thaw at. */
 	private final Map<UUID, Integer> frozenUntil = new HashMap<>();
 	/** Spots where an impostor placed Sub-Zero Powder Snow ("dimension:blockpos"). */
@@ -340,7 +342,7 @@ public final class GameController {
 
 	// ------------------------------------------------------------------ secret items
 
-	private record SerumState(String dimension, double x, double y, double z, int untilTick) {
+	private record SerumState(int untilTick) {
 	}
 
 	private static final String FREEZE_MODIFIER = "impostorsmp:freeze";
@@ -496,10 +498,10 @@ public final class GameController {
 
 	/** An entity went away. If it was a marked egg, it just landed: dig the pit. */
 	public void onEntityUnload(Entity entity, ServerLevel level) {
-    if (!entity.getType().toString().equals("minecraft:egg")) {
-        return;
-    }
-    Set<String> tags = entity.entityTags();
+		if (entity.getType() != EntityType.EGG) {
+			return;
+		}
+		Set<String> tags = entity.getTags();
 		boolean porta = tags.contains("impostorsmp_portapit");
 		if (!porta && !tags.contains("impostorsmp_voidegg")) {
 			return;
@@ -705,8 +707,7 @@ public final class GameController {
 
 	private void startSerum(ServerPlayer p) {
 		int seconds = rules.integer("secret_serum_seconds");
-		serum.put(p.getUUID(), new SerumState(dimensionId(p.level()), p.getX(), p.getY(), p.getZ(),
-			server.getTickCount() + seconds * 20));
+		serum.put(p.getUUID(), new SerumState(server.getTickCount() + seconds * 20));
 		Fx.run(server, "gamemode spectator " + p.getGameProfile().name());
 		p.sendSystemMessage(Component.literal("Spectral Serum: you are a spectator for " + seconds + " seconds. ")
 			.withStyle(ChatFormatting.LIGHT_PURPLE)
@@ -716,7 +717,11 @@ public final class GameController {
 	/** The player clicked [End early] (or typed /imp serum end). */
 	public void endSerumEarly(ServerPlayer p) {
 		if (serum.containsKey(p.getUUID())) {
-			endSerum(p.getUUID());
+			if (insideBlocks(p)) {
+				p.sendSystemMessage(Component.literal("You are inside blocks. Fly into open space first, then end it.").withStyle(ChatFormatting.RED));
+			} else {
+				endSerum(p.getUUID());
+			}
 		} else {
 			p.sendSystemMessage(Component.literal("You are not under the serum.").withStyle(ChatFormatting.RED));
 		}
@@ -725,23 +730,43 @@ public final class GameController {
 	private void tickSerum() {
 		int tick = server.getTickCount();
 		for (UUID id : new ArrayList<>(serum.keySet())) {
-			if (tick >= serum.get(id).untilTick()) {
-				endSerum(id);
+			if (tick < serum.get(id).untilTick()) {
+				continue;
 			}
+			ServerPlayer p = server.getPlayerList().getPlayer(id);
+			if (p != null && insideBlocks(p)) {
+				// Time is up, but turning back into a normal player inside a wall would suffocate them.
+				// They stay a spectator until they are in open space, then it ends by itself.
+				if (serumWarned.add(id)) {
+					p.sendSystemMessage(Component.literal("The serum is wearing off. Fly into open space and it will end.")
+						.withStyle(ChatFormatting.LIGHT_PURPLE));
+				}
+				continue;
+			}
+			endSerum(id);
 		}
+	}
+
+	/** True if the player's feet or head are inside a solid block. */
+	private static boolean insideBlocks(ServerPlayer p) {
+		Level level = p.level();
+		BlockPos feet = p.blockPosition();
+		BlockPos head = feet.above();
+		return !level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+			|| !level.getBlockState(head).getCollisionShape(level, head).isEmpty();
 	}
 
 	private void endSerum(UUID id) {
 		SerumState saved = serum.remove(id);
+		serumWarned.remove(id);
 		ServerPlayer p = server.getPlayerList().getPlayer(id);
 		if (saved == null || p == null) {
 			return; // offline: they are put back in survival when they rejoin
 		}
 		String name = p.getGameProfile().name();
 		Fx.run(server, "gamemode survival " + name);
-		Fx.run(server, String.format(Locale.ROOT, "execute in %s run tp %s %.2f %.2f %.2f", saved.dimension(), name,
-			saved.x(), saved.y(), saved.z()));
-		p.sendSystemMessage(Component.literal("The serum wears off. You are back where you drank it.").withStyle(ChatFormatting.LIGHT_PURPLE));
+		Fx.run(server, "effect give " + name + " minecraft:slow_falling 10 0 true"); // so ending it high up is survivable
+		p.sendSystemMessage(Component.literal("The serum wears off. You stay where you are.").withStyle(ChatFormatting.LIGHT_PURPLE));
 	}
 
 	/** Ends every serum and freeze (the game stopped or finished). */
