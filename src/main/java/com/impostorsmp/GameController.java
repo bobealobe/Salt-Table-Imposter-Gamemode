@@ -1003,7 +1003,7 @@ public final class GameController {
 	}
 
 	private static boolean isImpostorCompass(ItemStack stack) {
-		return stack.is(Items.COMPASS) && stack.getHoverName().getString().startsWith(COMPASS_NAME);
+		return stack.is(Items.COMPASS);
 	}
 
 	private static int compassSlot(ServerPlayer p) {
@@ -1084,7 +1084,7 @@ public final class GameController {
 			double[] target = compassTarget(p);
 			if (slot < 0 || target == null) {
 				if (decoy != null) {
-					p.sendSystemMessage(Component.literal("Compass test: " + (slot < 0 ? "no Impostor Compass found in your inventory." : "no target.")).withStyle(ChatFormatting.RED), true);
+					p.sendSystemMessage(Component.literal("Compass test: " + (slot < 0 ? "no compass found in your inventory (slots 0-35)." : "no target.")).withStyle(ChatFormatting.RED), true);
 				}
 				continue;
 			}
