@@ -57,11 +57,13 @@ final class ImpostorCommands {
 			root.then(Commands.literal("serum")
 				.then(Commands.literal("end").executes(ctx -> endSerum(ctx.getSource()))));
 			root.then(admin("start").executes(ctx -> start(ctx.getSource())));
+			root.then(admin("structures").executes(ctx -> structures(ctx.getSource())));
 			root.then(admin("test")
 				.then(Commands.literal("impostor").executes(ctx -> startTest(ctx.getSource(), Role.IMPOSTOR)))
 				.then(Commands.literal("innocent").executes(ctx -> startTest(ctx.getSource(), Role.INNOCENT)))
 				.then(Commands.literal("kit").executes(ctx -> testKit(ctx.getSource())))
-				.then(Commands.literal("compass").executes(ctx -> testCompass(ctx.getSource())))
+				.then(Commands.literal("compass").executes(ctx -> testCompass(ctx.getSource()))
+					.then(Commands.literal("decoy").executes(ctx -> testDecoy(ctx.getSource()))))
 				.then(Commands.literal("secret")
 					.then(Commands.literal("portapit").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.PORTA_PIT)))
 					.then(Commands.literal("void").executes(ctx -> testSecret(ctx.getSource(), Secret.Kind.VOID_EGG)))
@@ -146,7 +148,8 @@ final class ImpostorCommands {
 		say(src, "/imp role - see your own role");
 		say(src, "/imp accuse <player> - call somebody out (enough accusations reveal their role; /imp accuse clear takes it back)");
 		say(src, "/imp compass player|stronghold - impostors only: pick your compass once it is offered (chat buttons do the same)");
-		say(src, "Solo test (host): /imp test impostor | innocent | kit | compass (skips the clock to the compass offer) | secret portapit|void|snow|arrow|mahoraga|horde|serum|lootbox");
+		say(src, "Host: /imp structures - place the Nether fortress and bastion now (also done by /imp start)");
+		say(src, "Solo test (host): /imp test impostor | innocent | kit | compass (skips the clock to the compass offer) | compass decoy (a walking glowing armor stand the nearest-player compass follows, for testing alone) | secret portapit|void|snow|arrow|mahoraga|horde|serum|lootbox");
 		say(src, "Lobby (host): /imp lobby builds a sky lobby with a start button, /imp lobby remove takes it down");
 		say(src, "Host: /imp start, /imp stop, /imp status, /imp reveal, /imp rules, /imp rule <name> <value>, /imp lock");
 		return 1;
@@ -229,12 +232,37 @@ final class ImpostorCommands {
 		return 1;
 	}
 
+	private static int testDecoy(CommandSourceStack src) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		ServerPlayer player = src.getPlayer();
+		if (player == null) {
+			src.sendFailure(Component.literal("Run this as a player."));
+			return 0;
+		}
+		game.startCompassDecoy(player);
+		return 1;
+	}
+
 	private static int clearAccusation(CommandSourceStack src) throws CommandSyntaxException {
 		GameController game = game(src);
 		if (game == null) {
 			return 0;
 		}
 		game.clearAccusation(src.getPlayerOrException());
+		return 1;
+	}
+
+	private static int structures(CommandSourceStack src) {
+		GameController game = game(src);
+		if (game == null || !allowed(src, game)) {
+			return 0;
+		}
+		say(src, "Placing the Nether fortress and bastion. This can take a few seconds.");
+		game.placeNetherStructures();
+		say(src, "Done. Check the server log if something is missing.");
 		return 1;
 	}
 

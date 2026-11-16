@@ -43,7 +43,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.level.storage.LevelResource;
 
 /** Runs the actual game: picking roles, the countdown, deaths, win conditions. One per world that is opened. */
 public final class GameController {
@@ -57,6 +56,9 @@ public final class GameController {
 	private final Map<UUID, Integer> lastAccuse = new HashMap<>();
 	/** The spot each nearest-player compass was last aimed at, so it is only replaced when the target moves. */
 	private final Map<UUID, String> lastCompassTarget = new HashMap<>();
+	private double[] decoy;
+	private double[] decoyCenter;
+	private double decoyAngle;
 	private final Random random = new Random();
 	/** Players under a Spectral Serum right now, and where to put them back. */
 	private final Map<UUID, SerumState> serum = new HashMap<>();
@@ -72,8 +74,7 @@ public final class GameController {
 	GameController(MinecraftServer server, Path configDir) {
 		this.server = server;
 		this.rules = new Rules(configDir.resolve("impostorsmp-rules.properties"));
-		// this.statePath = configDir.resolve("impostorsmp-game.properties");
-		this.statePath = server.getWorldPath(LevelResource.ROOT).resolve("impostersmp-game.properties");
+		this.statePath = configDir.resolve("impostorsmp-game.properties");
 
 		GameState loaded = GameState.load(statePath);
 		long seed = server.overworld().getSeed();
@@ -131,6 +132,9 @@ public final class GameController {
 				if (rules.bool("compass")) {
 					compassSecond();
 				}
+			}
+			if (decoy != null && tick % 4 == 0) {
+				tickDecoy();
 			}
 			if (rules.bool("compass") && tick % (rules.integer("compass_refresh_seconds") * 20) == 0) {
 				refreshCompasses();
@@ -945,10 +949,10 @@ public final class GameController {
 	}
 
 	private void giveNearestCompass(ServerPlayer p) {
-		ServerPlayer target = nearestOther(p);
-		int x = (int) Math.floor(target != null ? target.getX() : p.getX());
-		int y = (int) Math.floor(target != null ? target.getY() : p.getY());
-		int z = (int) Math.floor(target != null ? target.getZ() : p.getZ());
+		double[] target = compassTarget(p);
+		int x = (int) Math.floor(target != null ? target[0] : p.getX());
+		int y = (int) Math.floor(target != null ? target[1] : p.getY());
+		int z = (int) Math.floor(target != null ? target[2] : p.getZ());
 		placeCompass(p, compassItem("nearest player", x, y, z, dimensionId(p.level())));
 		lastCompassTarget.remove(p.getUUID());
 		p.sendSystemMessage(Component.literal(target != null
@@ -1038,10 +1042,12 @@ public final class GameController {
 				return;
 			}
 			ImpostorLog.warn("Compass could not be placed silently: " + error);
+			p.sendSystemMessage(Component.literal("Compass problem (silent placing): " + error).withStyle(ChatFormatting.RED));
 		}
 		String error = Fx.runChecked(server, "give " + name + " " + item + " 1");
 		if (error != null) {
 			ImpostorLog.warn("Compass could not be given: " + error);
+			p.sendSystemMessage(Component.literal("Compass problem (give): " + error).withStyle(ChatFormatting.RED));
 		}
 	}
 
@@ -1075,14 +1081,21 @@ public final class GameController {
 				continue;
 			}
 			int slot = compassSlot(p);
-			ServerPlayer target = nearestOther(p);
+			double[] target = compassTarget(p);
 			if (slot < 0 || target == null) {
+				if (decoy != null) {
+					p.sendSystemMessage(Component.literal("Compass test: " + (slot < 0 ? "no Impostor Compass found in your inventory." : "no target.")).withStyle(ChatFormatting.RED), true);
+				}
 				continue;
 			}
-			int x = (int) Math.floor(target.getX());
-			int y = (int) Math.floor(target.getY());
-			int z = (int) Math.floor(target.getZ());
-			String key = dimensionId(p.level()) + ":" + (x >> 1) + ":" + (z >> 1);
+			int x = (int) Math.floor(target[0]);
+			int y = (int) Math.floor(target[1]);
+			int z = (int) Math.floor(target[2]);
+			if (decoy != null) {
+				long dist = Math.round(Math.sqrt(Math.pow(p.getX() - target[0], 2) + Math.pow(p.getZ() - target[2], 2)));
+				p.sendSystemMessage(Component.literal("Compass target " + x + " " + y + " " + z + " | " + dist + " blocks away").withStyle(ChatFormatting.YELLOW), true);
+			}
+			String key = dimensionId(p.level()) + ":" + x + ":" + z;
 			if (key.equals(lastCompassTarget.get(m.id()))) {
 				continue;
 			}
@@ -1091,8 +1104,50 @@ public final class GameController {
 				+ " with " + compassItem("nearest player", x, y, z, dimensionId(p.level())));
 			if (error != null) {
 				ImpostorLog.warn("Compass could not be updated: " + error);
+				p.sendSystemMessage(Component.literal("Compass problem (update): " + error).withStyle(ChatFormatting.RED));
 			}
 		}
+	}
+
+	/** Where the nearest-player compass should point for {@code p}: the closest other player, or the test decoy. */
+	private double[] compassTarget(ServerPlayer p) {
+		ServerPlayer other = nearestOther(p);
+		if (other != null) {
+			return new double[] {other.getX(), other.getY(), other.getZ()};
+		}
+		if (decoy != null && p.level().dimension().equals(Level.OVERWORLD)) {
+			return decoy.clone();
+		}
+		return null;
+	}
+
+	/** Solo test: a glowing armor stand that walks in a circle around the host; the compass should follow it. */
+	public void startCompassDecoy(ServerPlayer host) {
+		decoyCenter = new double[] {host.getX(), host.getY(), host.getZ()};
+		decoyAngle = 0;
+		decoy = new double[] {host.getX() + 30, host.getY(), host.getZ()};
+		Fx.run(server, "execute as @e[tag=impostorsmp_decoy] run kill @s");
+		Fx.run(server, "summon armor_stand " + decoy[0] + " " + decoy[1] + " " + decoy[2]
+			+ " {Tags:[\"impostorsmp_decoy\"],NoGravity:1b,Glowing:1b,CustomName:{text:\"Compass decoy\"},CustomNameVisible:1b}");
+		lastCompassTarget.clear();
+		host.sendSystemMessage(Component.literal("Decoy placed 30 blocks east of you. It walks in a circle. Your compass should follow the glowing armor stand.").withStyle(ChatFormatting.GREEN));
+	}
+
+	private void tickDecoy() {
+		if (decoy == null) {
+			return;
+		}
+		decoyAngle += 0.02;
+		decoy[0] = decoyCenter[0] + Math.cos(decoyAngle) * 30;
+		decoy[2] = decoyCenter[2] + Math.sin(decoyAngle) * 30;
+		Fx.run(server, "execute as @e[tag=impostorsmp_decoy] run tp @s " + decoy[0] + " " + decoy[1] + " " + decoy[2]);
+	}
+
+	public void stopCompassDecoy() {
+		if (decoy != null) {
+			Fx.run(server, "execute as @e[tag=impostorsmp_decoy] run kill @s");
+		}
+		decoy = null;
 	}
 
 	private void beginRunning() {
@@ -1103,6 +1158,7 @@ public final class GameController {
 
 	/** Cancels the current game without a winner. */
 	public void stop() {
+		stopCompassDecoy();
 		endAllSecretEffects();
 		scheduler.clear();
 		state.reset();
