@@ -62,6 +62,8 @@ public final class Rules {
 		bool("dragon_wins", true, "Killing the Ender Dragon makes the innocents win."),
 		bool("parity_win", false, "Impostors also win once they are at least as many as the innocents left (2 v 2)."),
 		integer("impostors", 2, 1, 5, "How many impostors /imp start picks."),
+		bool("nether_structures", false, "Off by default. When on, /imp start places a Nether fortress and a bastion remnant close to the middle of the Nether."),
+		integer("nether_structure_distance", 70, 20, 120, "How far from the middle of the Nether (in Nether blocks) those two are placed. Nether blocks are 8 overworld blocks."),
 		bool("apply_gamerules", true, "At world start and /imp start: locator bar off, reduced F3, no death or advancement messages."),
 		bool("spread_on_start", false, "/imp start first spreads everybody out randomly with /spreadplayers."),
 		integer("spread_radius", 2500, 100, 29999999, "Spread area is a square this many blocks from 0,0 in every direction."),
